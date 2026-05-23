@@ -5,6 +5,9 @@
  * 情绪影响回复风格：开心→活泼，疲惫→简短，焦虑→更温柔。
  */
 
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { getDataRoot, writeFileAtomic } from "./config.js";
 import { getDateInTimezone, pickRandom } from "./utils.js";
 
 // ---- 类型 ----
@@ -153,7 +156,7 @@ function _detectEmotionTriggers(msg: string): Emotion[] {
   const triggers: Emotion[] = [];
 
   const maps: [Emotion, string[]][] = [
-    ["excited", ["太好了", "太棒", "哈哈", "笑死", "好开心", "耶", "！"]],
+    ["excited", ["太好了", "太棒", "哈哈", "笑死", "好开心", "耶"]],
     ["sad",     ["难过", "不开心", "伤心", "郁闷", "好烦", "崩溃", "想哭"]],
     ["anxious", ["担心", "害怕", "紧张", "不安", "压力", "焦虑"]],
     ["caring",  ["辛苦了", "谢谢你", "想你", "抱抱", "爱你", "暖心"]],
@@ -171,4 +174,24 @@ function _detectEmotionTriggers(msg: string): Emotion[] {
   }
 
   return triggers;
+}
+
+// ---- 持久化 ----
+
+function emotionPath() {
+  return resolve(getDataRoot(), "data", "emotion-state.json");
+}
+
+export function saveEmotionState(state: EmotionState): void {
+  writeFileAtomic(emotionPath(), JSON.stringify(state, null, 2));
+}
+
+export function loadEmotionState(): EmotionState | null {
+  const path = emotionPath();
+  if (!existsSync(path)) return null;
+  try {
+    return JSON.parse(readFileSync(path, "utf-8")) as EmotionState;
+  } catch {
+    return null;
+  }
 }

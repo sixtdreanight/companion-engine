@@ -13,6 +13,19 @@ import { logger, recordPipelineMessage, recordPipelineError } from "./utils.js";
 import { saveShortTerm } from "./memory.js";
 import { splitForChat } from "./split.js";
 import { preProcessStage } from "./stages/preprocess.js";
+
+// ---- 速率限制 ----
+
+const _msgTimestamps = new Map<string, number>();
+const MIN_MSG_INTERVAL_MS = 500;
+
+function checkRateLimit(userId: string): boolean {
+  const now = Date.now();
+  const last = _msgTimestamps.get(userId);
+  if (last && now - last < MIN_MSG_INTERVAL_MS) return false;
+  _msgTimestamps.set(userId, now);
+  return true;
+}
 import { memoryStage, type SummaryState } from "./stages/memory.js";
 import { contextStage } from "./stages/context.js";
 import { generationStage, createAIProvider } from "./stages/generation.js";
@@ -90,6 +103,11 @@ export async function processMessage(
   const { model, config, profile } = ctx;
   const cp = _getCheckpointer(ctx);
   const t0 = Date.now();
+
+  if (!checkRateLimit(userId)) {
+    logger.debug(`Rate limited: ${userId}`);
+    return ["消息太快了，让我喘口气吧~"];
+  }
 
   cleanupSessions();
 

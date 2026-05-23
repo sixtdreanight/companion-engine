@@ -86,8 +86,8 @@ export class LLMSafetyChecker implements SafetyChecker {
   ): Promise<SafetyCheckResult> {
     const ctx = context?.slice(-3).join("\n") || "";
     const prompt = ctx
-      ? `上下文:\n${ctx}\n\n用户消息: ${message}`
-      : `用户消息: ${message}`;
+      ? `<context>\n${ctx}\n</context>\n<user_message>\n${message}\n</user_message>`
+      : `<user_message>\n${message}\n</user_message>`;
 
     try {
       const raw = await this.generateText(SAFETY_JUDGE_PROMPT, prompt);
@@ -99,7 +99,8 @@ export class LLMSafetyChecker implements SafetyChecker {
       };
     } catch {
       // LLM 调用失败 → 安全侧（放行），避免阻断正常对话
-      return { safe: true, reason: "checker_unavailable" };
+      // LLM 调用失败 → fail-close（拒绝），避免安全绕过
+      return { safe: false, reason: "checker_unavailable", riskLevel: "medium" };
     }
   }
 

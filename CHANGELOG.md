@@ -26,5 +26,21 @@
 - `relationship.ts` tracks `lastInteractionAt` for decay calculation
 - `OLLAMA_STRATEGY` now includes sensible `minP` and `topK` defaults
 
+## v0.2.1 (2026-05-24)
+
+### Security Fixes
+- **Path traversal**: `sanitizePathId()` added to `config.ts` — applied to `userId` in `memory.ts` and `characterId` in `relationship.ts` to prevent directory traversal via crafted IDs
+- **Unicode bypass**: `checkInput()` now normalizes to NFKC before regex matching (homoglyph defense)
+- **LLM safety checker**: Changed from fail-open to fail-closed — checker unavailability now blocks content
+- **Safety judge hardening**: User input wrapped in `<user_message>` XML boundaries to prevent prompt injection into the safety LLM
+- **Checkpointer namespace**: `sanitizePathId()` applied to `JsonCheckpointer` namespace and keys
+
+### Bug Fixes
+- **Confession false match**: `我不喜欢你` no longer triggers confession flow (`(?<!不)` negative lookbehind)
+- **Dynamic imports removed**: `renameSync`/`unlinkSync`/`readdirSync` now imported statically in `checkpointer.ts`
+- **Emotion persistence**: `saveEmotionState()`/`loadEmotionState()` added (`emotion.ts`)
+- **Postprocess topic**: Fact extraction now uses captured match group instead of meaningless `slice(0, 2)`
+- **Rate limiting**: `processMessage()` enforces 500ms minimum interval between messages (`pipeline.ts`)
+
 ### Tests
-- 56 tests: safety, relationship (affection/confession/breakup/decay/boundary), emotion, embedding, checkpointer
+- 75 tests: safety, relationship, emotion, embedding, checkpointer, personality

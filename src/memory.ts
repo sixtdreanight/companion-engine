@@ -8,7 +8,7 @@
 
 import { readFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
 import { resolve } from "node:path";
-import { getDataRoot, writeFileAtomic } from "./config.js";
+import { getDataRoot, writeFileAtomic, sanitizePathId } from "./config.js";
 import { logger, retry } from "./utils.js";
 
 // ---- 类型 ----
@@ -61,7 +61,8 @@ function ensureDirs() {
  */
 export function loadShortTerm(userId: string, maxTurns: number): ConversationTurn[] {
   ensureDirs();
-  const filePath = resolve(convDir(), `${userId}.json`);
+  const safeId = sanitizePathId(userId);
+  const filePath = resolve(convDir(), `${safeId}.json`);
   if (!existsSync(filePath)) return [];
 
   try {
@@ -87,7 +88,8 @@ export function loadShortTerm(userId: string, maxTurns: number): ConversationTur
  */
 export function saveShortTerm(userId: string, userMsg: string, assistantMsg: string) {
   ensureDirs();
-  const filePath = resolve(convDir(), `${userId}.json`);
+  const safeId = sanitizePathId(userId);
+  const filePath = resolve(convDir(), `${safeId}.json`);
   const now = new Date().toISOString();
   const userTurn = { role: "user" as const, content: userMsg, timestamp: now };
   const assistantTurn = { role: "assistant" as const, content: assistantMsg, timestamp: now };
@@ -110,7 +112,8 @@ export function removeLastTurn(userId: string): string | null {
   const lastUser = history[history.length - 2];
   if (lastAssistant.role !== "assistant" || lastUser.role !== "user") return null;
   history.splice(-2, 2);
-  writeFileAtomic(resolve(convDir(), `${userId}.json`), JSON.stringify(history, null, 2));
+  const safeId = sanitizePathId(userId);
+  writeFileAtomic(resolve(convDir(), `${safeId}.json`), JSON.stringify(history, null, 2));
   return lastUser.content;
 }
 

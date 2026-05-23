@@ -79,7 +79,7 @@ function handleRelationshipFlow(
   relState: ReturnType<typeof getOrCreateState>,
 ): string | null {
   // 用户告白
-  if (/(告白|表白|我喜欢你|我爱你|在一起|做我(女朋友|男朋友)|交往)/.test(userMessage)) {
+  if (/(告白|表白|(?<!不)我喜欢你|(?<!不)我爱你|在一起|做我(女朋友|男朋友)|交往)/.test(userMessage)) {
     if (relState.stage === "lover") {
       return `${profile.user_nickname}...我们不是早就在一起了吗？傻瓜~ ❤️`;
     }

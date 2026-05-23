@@ -5,9 +5,12 @@
  * MemoryCheckpointer 用于测试。
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import {
+  readFileSync, writeFileSync, renameSync,
+  existsSync, mkdirSync, unlinkSync, readdirSync,
+} from "node:fs";
 import { resolve, dirname } from "node:path";
-import { getDataRoot } from "./config.js";
+import { getDataRoot, sanitizePathId } from "./config.js";
 import { logger } from "./utils.js";
 
 export interface Checkpointer<T = unknown> {
@@ -27,11 +30,12 @@ export class JsonCheckpointer<T = unknown> implements Checkpointer<T> {
   private dir: string;
 
   constructor(namespace: string) {
-    this.dir = resolve(getDataRoot(), "data", "checkpoints", namespace);
+    const safeNs = sanitizePathId(namespace);
+    this.dir = resolve(getDataRoot(), "data", "checkpoints", safeNs);
   }
 
   private filePath(key: string): string {
-    return resolve(this.dir, `${key}.json`);
+    return resolve(this.dir, `${sanitizePathId(key)}.json`);
   }
 
   async get(key: string): Promise<T | null> {
@@ -50,21 +54,18 @@ export class JsonCheckpointer<T = unknown> implements Checkpointer<T> {
     const path = this.filePath(key);
     const tmp = path + ".tmp." + Date.now();
     writeFileSync(tmp, JSON.stringify(state, null, 2), "utf-8");
-    const { renameSync } = await import("node:fs");
     renameSync(tmp, path);
   }
 
   async delete(key: string): Promise<void> {
     const path = this.filePath(key);
     try {
-      const { unlinkSync } = await import("node:fs");
       if (existsSync(path)) unlinkSync(path);
     } catch { /* best effort */ }
   }
 
   async list(): Promise<string[]> {
     if (!existsSync(this.dir)) return [];
-    const { readdirSync } = await import("node:fs");
     return readdirSync(this.dir)
       .filter((f) => f.endsWith(".json"))
       .map((f) => f.replace(/\.json$/, ""));

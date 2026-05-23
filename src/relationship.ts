@@ -10,7 +10,7 @@
 
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { getDataRoot, writeFileAtomic } from "./config.js";
+import { getDataRoot, writeFileAtomic, sanitizePathId } from "./config.js";
 import type { RelationshipMode, RelationshipStage } from "./config.js";
 import { logger } from "./utils.js";
 
@@ -51,7 +51,8 @@ export interface ConfessionRecord {
 
 function relationshipPath(characterId?: string) {
   if (characterId) {
-    return resolve(getDataRoot(), "data", "relationships", `${characterId}.json`);
+    const safeId = sanitizePathId(characterId);
+    return resolve(getDataRoot(), "data", "relationships", `${safeId}.json`);
   }
   return resolve(getDataRoot(), "data", "relationship.json");
 }

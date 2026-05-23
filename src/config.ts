@@ -349,3 +349,8 @@ export function writeFileAtomic(filePath: string, content: string): void {
   writeFileSync(tmpPath, content, "utf-8");
   renameSync(tmpPath, filePath);
 }
+
+/** 路径 ID 消毒：防止目录穿越攻击 */
+export function sanitizePathId(id: string): string {
+  return id.replace(/[/\\:*?"<>|]/g, "_").replace(/\.\./g, "_").replace(/\0/g, "").slice(0, 200) || "unknown";
+}

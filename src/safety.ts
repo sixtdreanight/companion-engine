@@ -57,10 +57,11 @@ export function checkInput(msg: string, filterLevel: FilterLevel = "strict"): Sa
   if (filterLevel === "off") return { ok: true };
   if (!msg || msg.trim().length === 0) return { ok: true };
 
+  const normalized = msg.normalize("NFKC");
   const patterns = filterLevel === "moderate" ? MODERATE_PATTERNS : BLOCKED_PATTERNS;
 
   for (const pattern of patterns) {
-    if (pattern.test(msg)) {
+    if (pattern.test(normalized)) {
       logger.warn(`安全拦截: "${msg.slice(0, 80)}" → ${pattern.source}`);
       return { ok: false, reason: "illegal", userMessage: msg };
     }

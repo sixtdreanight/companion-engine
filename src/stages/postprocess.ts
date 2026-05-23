@@ -77,7 +77,9 @@ export function postProcessStage(input: PostProcessInput): string[] {
     for (const pattern of patterns) {
       const match = userMessage.match(pattern);
       if (match) {
-        updateFact(match[0].slice(0, 2), match[0]);
+        // 话题用匹配内容中实际捕获的部分，而非无意义的首2字符
+        const topic = match[1] || match[0].slice(0, 10);
+        updateFact(topic, match[0]);
         break;
       }
     }
