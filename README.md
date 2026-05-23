@@ -1,10 +1,10 @@
-# @sleepnight/companion-core
+# @sixtdreamnight/companion-engine
 
 **AI companion core engine — personality, relationship, memory, safety, and pipeline.**
 
 Powers [Yumema](https://github.com/sixtdreanight) and V-Partner.
 
-[![npm version](https://img.shields.io/npm/v/@sleepnight/companion-core.svg)](https://www.npmjs.com/package/@sleepnight/companion-core)
+[![npm version](https://img.shields.io/npm/v/@sixtdreamnight/companion-engine.svg)](https://www.npmjs.com/package/@sixtdreamnight/companion-engine)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL%203.0-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![TypeScript](https://img.shields.io/badge/%3C/%3E-TypeScript-3178C6.svg)](https://www.typescriptlang.org/)
 
@@ -19,13 +19,13 @@ Powers [Yumema](https://github.com/sixtdreanight) and V-Partner.
 ### Installation
 
 ```bash
-npm install @sleepnight/companion-core
+npm install @sixtdreamnight/companion-engine
 ```
 
 ### Quick Start
 
 ```typescript
-import { loadConfig, processMessage } from "@sleepnight/companion-core";
+import { loadConfig, processMessage } from "@sixtdreamnight/companion-engine";
 import "dotenv/config";
 
 const config = loadConfig();
@@ -68,13 +68,13 @@ GPL-3.0 — see [LICENSE](./LICENSE).
 ### 安装
 
 ```bash
-npm install @sleepnight/companion-core
+npm install @sixtdreamnight/companion-engine
 ```
 
 ### 快速开始
 
 ```typescript
-import { loadConfig, processMessage } from "@sleepnight/companion-core";
+import { loadConfig, processMessage } from "@sixtdreamnight/companion-engine";
 import "dotenv/config";
 
 const config = loadConfig();

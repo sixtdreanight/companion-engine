@@ -1,5 +1,5 @@
 {
-  "name": "@sleepnight/companion-core",
+  "name": "@sixtdreamnight/companion-engine",
   "version": "0.1.0",
   "description": "AI companion core engine — personality, relationship, memory, safety, and pipeline",
   "type": "module",
