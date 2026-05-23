@@ -26,7 +26,7 @@
 - `relationship.ts` tracks `lastInteractionAt` for decay calculation
 - `OLLAMA_STRATEGY` now includes sensible `minP` and `topK` defaults
 
-## v0.2.1 (2026-05-24)
+## v0.2.2 (2026-05-24)
 
 ### Security Fixes
 - **Path traversal**: `sanitizePathId()` added to `config.ts` — applied to `userId` in `memory.ts` and `characterId` in `relationship.ts` to prevent directory traversal via crafted IDs
