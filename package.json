@@ -24,6 +24,9 @@
     "@types/node-cron": "^3.0.11",
     "typescript": "^5.0.0"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "license": "GPL-3.0",
   "author": "梦夜十六"
 }
