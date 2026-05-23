@@ -60,7 +60,6 @@ This package does not bundle these — install them alongside:
 ## Related / 相关项目
 
 - [Yumema](https://github.com/sixtdreanight/Yumema) — Electron desktop AI companion, powered by this engine
-- [V-Partner](https://github.com/sixtdreanight/V-Partner) — CLI + QQ bot, powered by this engine
 
 ### License
 
