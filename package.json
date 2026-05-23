@@ -1,8 +1,12 @@
 {
   "name": "@sixtdreamnight/companion-engine",
-  "version": "0.1.0",
-  "description": "AI companion core engine — personality, relationship, memory, safety, and pipeline",
+  "version": "0.2.1",
+  "description": "AI companion core engine — personality, relationship, memory, safety, pipeline, streaming, emotion model, semantic search",
   "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
   "main": "./src/index.js",
   "types": "./src/index.ts",
   "exports": {
@@ -21,8 +25,10 @@
     "zod": "^3.0.0"
   },
   "devDependencies": {
+    "@types/node": "^25.9.1",
     "@types/node-cron": "^3.0.11",
-    "typescript": "^5.0.0"
+    "typescript": "^5.0.0",
+    "vitest": "^4.1.7"
   },
   "publishConfig": {
     "access": "public"

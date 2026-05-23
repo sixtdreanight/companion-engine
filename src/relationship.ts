@@ -35,6 +35,8 @@ export interface RelationshipState {
   totalInteractions: number;
   /** 最近一次评估时的互动数 */
   lastEvaluationAt: number;
+  /** 最近一次互动时间（ISO），用于好感度衰减 */
+  lastInteractionAt: string;
   /** 关系开始时间 */
   startedAt: string;
 }
@@ -47,7 +49,12 @@ export interface ConfessionRecord {
 
 // ---- 常量 ----
 
-function relationshipPath() { return resolve(getDataRoot(), "data", "relationship.json"); }
+function relationshipPath(characterId?: string) {
+  if (characterId) {
+    return resolve(getDataRoot(), "data", "relationships", `${characterId}.json`);
+  }
+  return resolve(getDataRoot(), "data", "relationship.json");
+}
 
 /** 告白成功的最低好感度 */
 const CONFESSION_THRESHOLD = 40;
@@ -85,31 +92,60 @@ export function createRelationshipState(mode: RelationshipMode): RelationshipSta
     breakupPending: false,
     totalInteractions: 0,
     lastEvaluationAt: 0,
+    lastInteractionAt: new Date().toISOString(),
     startedAt: new Date().toISOString(),
   };
 }
 
-/** 加载关系状态 */
-export function loadRelationshipState(): RelationshipState | null {
-  if (!existsSync(relationshipPath())) return null;
+/** 加载关系状态（支持多角色） */
+export function loadRelationshipState(characterId?: string): RelationshipState | null {
+  const path = relationshipPath(characterId);
+  if (!existsSync(path)) return null;
   try {
-    return JSON.parse(readFileSync(relationshipPath(), "utf-8")) as RelationshipState;
+    return JSON.parse(readFileSync(path, "utf-8")) as RelationshipState;
   } catch {
     return null;
   }
 }
 
 /** 保存关系状态 */
-export function saveRelationshipState(state: RelationshipState) {
-  writeFileAtomic(relationshipPath(), JSON.stringify(state, null, 2));
+export function saveRelationshipState(state: RelationshipState, characterId?: string) {
+  writeFileAtomic(relationshipPath(characterId), JSON.stringify(state, null, 2));
 }
 
 /** 获取或初始化关系状态 */
-export function getOrCreateState(mode: RelationshipMode): RelationshipState {
-  const existing = loadRelationshipState();
+export function getOrCreateState(mode: RelationshipMode, characterId?: string): RelationshipState {
+  const existing = loadRelationshipState(characterId);
   if (existing) return existing;
   const state = createRelationshipState(mode);
-  saveRelationshipState(state);
+  saveRelationshipState(state, characterId);
+  return state;
+}
+
+// ═══════════════════════════════════════════════════════
+// 好感度衰减
+// ═══════════════════════════════════════════════════════
+
+/**
+ * 应用好感度衰减 — 7 天未互动后每天减 1 点。
+ * 在 updateAffection 之前调用。
+ */
+export function applyAffectionDecay(state: RelationshipState): RelationshipState {
+  if (state.mode === "direct") return state;  // 直接模式不衰减
+
+  const now = Date.now();
+  const lastTime = new Date(state.lastInteractionAt).getTime();
+  const daysSinceLast = (now - lastTime) / (24 * 60 * 60 * 1000);
+
+  if (daysSinceLast > 7) {
+    const decayDays = Math.floor(daysSinceLast - 7);  // 第 8 天开始
+    const decay = decayDays * 1;  // 每天 -1
+    state.affection = Math.max(0, state.affection - decay);
+    if (decay > 0) {
+      logger.debug(`好感度衰减: -${decay} (${decayDays}天未互动)`);
+    }
+  }
+
   return state;
 }
 
@@ -160,6 +196,7 @@ export function calculateAffectionDelta(
 export function updateAffection(state: RelationshipState, delta: number): RelationshipState {
   state.affection = Math.max(0, Math.min(100, state.affection + delta));
   state.totalInteractions++;
+  state.lastInteractionAt = new Date().toISOString();
 
   // 检查阶段晋升（仅在养成模式且未到达恋人阶段）
   if (state.mode === "slow_burn" && state.stage !== "lover") {

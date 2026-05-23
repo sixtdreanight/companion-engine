@@ -12,6 +12,12 @@ export interface ModelStrategy {
   frequencyPenalty: number;
   repetitionPenalty: number;
   maxOutputTokens: number;
+  // Advanced sampling (local models / Ollama)
+  minP?: number;
+  topK?: number;
+  mirostat?: number;       // 0=off, 1=v1, 2=v2
+  mirostatTau?: number;    // target entropy
+  mirostatEta?: number;    // learning rate
   // Prompt strategy
   systemPromptStyle: "narrative" | "structured" | "technical";
   chatExampleCount: number;
@@ -80,6 +86,8 @@ export const OLLAMA_STRATEGY: ModelStrategy = {
   frequencyPenalty: 0,
   repetitionPenalty: 1.12,
   maxOutputTokens: 512,
+  minP: 0.05,
+  topK: 40,
   systemPromptStyle: "structured",
   chatExampleCount: 4,
   authorNotePosition: "system-start",

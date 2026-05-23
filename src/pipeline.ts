@@ -18,52 +18,62 @@ import { contextStage } from "./stages/context.js";
 import { generationStage, createAIProvider } from "./stages/generation.js";
 import { postProcessStage } from "./stages/postprocess.js";
 
+import { Checkpointer, JsonCheckpointer } from "./checkpointer.js";
+
 export { createAIProvider, splitForChat };
 
 export interface PipelineContext {
   model: LanguageModel;
   config: AppConfig;
   profile: Profile;
+  /** 可选的持久化 checkpointer，默认 JSON 文件 */
+  checkpointer?: Checkpointer<SummaryState>;
 }
 
-/** 每个用户的摘要状态 */
-const summaryStates = new Map<string, SummaryState>();
-
-/** 会话最后活跃时间，用于 TTL 淘汰 */
-const lastActive = new Map<string, number>();
+/** 活跃会话 Track（用于 TTL 淘汰），独立于持久化存储 */
+const _activeTimestamps = new Map<string, number>();
 
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 const SESSION_MAX = 100;
 
+/** 默认 JSON 文件 checkpointer */
+const _defaultCheckpointer = new JsonCheckpointer<SummaryState>("sessions");
+
+function _getCheckpointer(ctx: PipelineContext): Checkpointer<SummaryState> {
+  return ctx.checkpointer ?? _defaultCheckpointer;
+}
+
 export function cleanupSessions(): void {
   const now = Date.now();
-
-  for (const [userId, ts] of lastActive) {
+  for (const [userId, ts] of _activeTimestamps) {
     if (now - ts > SESSION_TTL_MS) {
-      summaryStates.delete(userId);
-      lastActive.delete(userId);
+      _activeTimestamps.delete(userId);
     }
   }
-
-  if (summaryStates.size > SESSION_MAX) {
-    const sorted = [...lastActive.entries()]
-      .sort((a, b) => a[1] - b[1]);
-    for (const [userId] of sorted.slice(0, summaryStates.size - SESSION_MAX)) {
-      summaryStates.delete(userId);
-      lastActive.delete(userId);
+  if (_activeTimestamps.size > SESSION_MAX) {
+    const sorted = [..._activeTimestamps.entries()].sort((a, b) => a[1] - b[1]);
+    for (const [userId] of sorted.slice(0, _activeTimestamps.size - SESSION_MAX)) {
+      _activeTimestamps.delete(userId);
     }
   }
 }
 
-function getSummaryState(userId: string): SummaryState | undefined {
-  const state = summaryStates.get(userId);
-  lastActive.set(userId, Date.now());
-  return state;
+async function getSummaryState(
+  userId: string,
+  cp: Checkpointer<SummaryState>,
+): Promise<SummaryState | undefined> {
+  _activeTimestamps.set(userId, Date.now());
+  const state = await cp.get(userId);
+  return state ?? undefined;
 }
 
-function setSummaryState(userId: string, state: SummaryState): void {
-  summaryStates.set(userId, state);
-  lastActive.set(userId, Date.now());
+async function setSummaryState(
+  userId: string,
+  state: SummaryState,
+  cp: Checkpointer<SummaryState>,
+): Promise<void> {
+  _activeTimestamps.set(userId, Date.now());
+  await cp.set(userId, state);
 }
 
 /**
@@ -78,12 +88,12 @@ export async function processMessage(
   ctx: PipelineContext,
 ): Promise<string[]> {
   const { model, config, profile } = ctx;
+  const cp = _getCheckpointer(ctx);
   const t0 = Date.now();
 
-  // 定期清理过期会话
   cleanupSessions();
 
-  // Stage 1: PreProcess — 安全 + 关系 + 搜索
+  // Stage 1: PreProcess
   const t1 = Date.now();
   const pre = await preProcessStage({ userId, userMessage, model, config, profile });
   if (pre.earlyReturn !== null) {
@@ -91,15 +101,16 @@ export async function processMessage(
     return splitForChat(pre.earlyReturn);
   }
 
-  // Stage 2: Memory — 记忆加载 + 摘要
+  // Stage 2: Memory — 使用持久化 checkpointer
   const t2 = Date.now();
+  const prevState = await getSummaryState(userId, cp);
   const mem = await memoryStage(
     { userId, userMessage, model, config },
-    getSummaryState(userId),
+    prevState,
   );
-  setSummaryState(userId, mem.summaryState);
+  await setSummaryState(userId, mem.summaryState, cp);
 
-  // Stage 3: Context — 系统提示词组装
+  // Stage 3-5: 同前
   const t3 = Date.now();
   const ctxOut = contextStage({
     userId, userMessage, profile, config,
@@ -110,7 +121,6 @@ export async function processMessage(
     relState: pre.relState,
   });
 
-  // Stage 4: Generation — AI 调用 + 备用模型 + 输出检查
   const t4 = Date.now();
   const gen = await generationStage({
     userMessage,
@@ -122,7 +132,6 @@ export async function processMessage(
     authorNotePosition: ctxOut.authorNotePosition,
   });
 
-  // Stage 5: PostProcess — 记忆保存 + 事实提取 + 气泡拆分
   const t5 = Date.now();
   const result = postProcessStage({
     userId,
@@ -135,7 +144,6 @@ export async function processMessage(
   });
   const t6 = Date.now();
 
-  // 流水线计时
   const totalMs = t6 - t0;
   logger.debug(
     `Pipeline: pre=${t2 - t1}ms mem=${t3 - t2}ms ctx=${t4 - t3}ms gen=${t5 - t4}ms post=${t6 - t5}ms total=${totalMs}ms`,
@@ -143,4 +151,87 @@ export async function processMessage(
   recordPipelineMessage(totalMs);
 
   return result;
+}
+
+/**
+ * 流式消息处理 — 返回 token 级别的异步生成器。
+ * 前 3 个阶段同步执行，Generation 阶段流式输出 token，
+ * PostProcess 在流结束后执行记忆保存。
+ */
+export async function* processMessageStream(
+  userId: string,
+  userMessage: string,
+  ctx: PipelineContext,
+): AsyncGenerator<string, void, void> {
+  const { model, config, profile } = ctx;
+  const cp = _getCheckpointer(ctx);
+
+  cleanupSessions();
+
+  // Stage 1: PreProcess
+  const pre = await preProcessStage({ userId, userMessage, model, config, profile });
+  if (pre.earlyReturn !== null) {
+    saveShortTerm(userId, userMessage, pre.earlyReturn);
+    for (const bubble of splitForChat(pre.earlyReturn)) {
+      yield bubble;
+    }
+    return;
+  }
+
+  // Stage 2: Memory
+  const prevState = await getSummaryState(userId, cp);
+  const mem = await memoryStage(
+    { userId, userMessage, model, config },
+    prevState,
+  );
+  await setSummaryState(userId, mem.summaryState, cp);
+
+  // Stage 3: Context
+  const ctxOut = contextStage({
+    userId, userMessage, profile, config,
+    searchResults: pre.searchResults,
+    memoryContext: mem.memoryContext,
+    learnedInterests: mem.learnedInterests,
+    conversationSummary: mem.conversationSummary,
+    relState: pre.relState,
+  });
+
+  // Stage 4: Generation — 流式
+  let reply = "";
+  try {
+    const { streamText } = await import("ai");
+    const result = streamText({
+      model,
+      system: ctxOut.systemPrompt,
+      messages: [
+        ...mem.history.map((t) => ({
+          role: t.role as "user" | "assistant",
+          content: t.content,
+        })),
+        { role: "user" as const, content: userMessage },
+      ],
+      maxOutputTokens: config.ai.maxTokens || 1024,
+      temperature: config.ai.temperature || 0.85,
+    });
+
+    for await (const chunk of result.textStream) {
+      reply += chunk;
+      yield chunk;
+    }
+  } catch {
+    const fallback = "呜...刚才走神了，再说一遍好吗？(｡•́︿•̀｡)";
+    reply = fallback;
+    yield fallback;
+  }
+
+  // Stage 5: PostProcess
+  postProcessStage({
+    userId,
+    userMessage,
+    reply,
+    model,
+    config,
+    profile,
+    totalTurns: mem.summaryState.totalTurns,
+  });
 }

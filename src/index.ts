@@ -26,10 +26,60 @@ export {
 export {
   type PipelineContext,
   processMessage,
+  processMessageStream,
   cleanupSessions,
   createAIProvider,
   splitForChat,
 } from "./pipeline.js";
+
+// ---- Checkpointer ----
+export {
+  type Checkpointer,
+  JsonCheckpointer,
+  MemoryCheckpointer,
+} from "./checkpointer.js";
+
+// ---- Embedding ----
+export {
+  type EmbeddingProvider,
+  TfIdfEmbeddingProvider,
+} from "./embedding.js";
+
+// ---- Validation ----
+export {
+  ProfileSchema,
+  AppConfigSchema,
+  validateProfileSchema,
+  validateAppConfig,
+  type ValidatedProfile,
+  type ValidatedAppConfig,
+} from "./validation.js";
+
+// ---- LLM Safety ----
+export {
+  type SafetyCheckResult,
+  type SafetyChecker,
+  type LLMSafetyCheckerOptions,
+  RegexSafetyChecker,
+  LLMSafetyChecker,
+  CompositeSafetyChecker,
+} from "./safety-llm.js";
+
+// ---- MBTI Inference ----
+export {
+  MBTI_TYPES,
+  type MBTIType,
+  type MBTIResult,
+  inferMBTI,
+  formatMBTIContext,
+} from "./mbti-inference.js";
+
+// ---- Card Import Extras ----
+export {
+  parseCAICard,
+  extractGreetings,
+  CARD_TEX_KEYWORDS,
+} from "./card-import-extra.js";
 
 // ---- Personality Engine ----
 export {
@@ -63,6 +113,7 @@ export {
   getOrCreateState,
   calculateAffectionDelta,
   updateAffection,
+  applyAffectionDecay,
   handleConfession,
   checkBoundaryViolation,
   handleBoundaryViolation,
@@ -70,6 +121,16 @@ export {
   stayFriends,
   buildStageGuidance,
 } from "./relationship.js";
+
+// ---- Emotion Model ----
+export {
+  type Emotion,
+  type EmotionState,
+  createEmotionState,
+  updateEmotion,
+  getEmotionContext,
+  getCurrentMood,
+} from "./emotion.js";
 
 // ---- Memory System ----
 export {
