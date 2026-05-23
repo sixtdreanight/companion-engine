@@ -57,6 +57,11 @@ This package does not bundle these — install them alongside:
 - `node-cron` ^3.0.0
 - `zod` ^3.0.0
 
+## Related / 相关项目
+
+- [Yumema](https://github.com/sixtdreanight/Yumema) — Electron desktop AI companion, powered by this engine
+- [V-Partner](https://github.com/sixtdreanight/V-Partner) — CLI + QQ bot, powered by this engine
+
 ### License
 
 GPL-3.0 — see [LICENSE](./LICENSE).
