@@ -25,7 +25,8 @@ jobs:
         run: npx tsc --noEmit
       - name: Run tests
         run: |
-          mkdir -p data/conversations data/feedback
+          mkdir -p data/conversations data/feedback data/relationships
+          mkdir -p ../data/conversations ../data/feedback ../data/relationships
           npx vitest run
 
   publish:
