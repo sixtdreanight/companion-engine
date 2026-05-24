@@ -24,7 +24,9 @@ jobs:
       - name: Type check
         run: npx tsc --noEmit
       - name: Run tests
-        run: npx vitest run
+        run: |
+          mkdir -p data/conversations data/feedback
+          npx vitest run
 
   publish:
     needs: test
