@@ -8,7 +8,7 @@ import { logger } from "./utils.js";
 // ---- 敏感模式 ----
 
 /** 匹配明确违法/违规/色情内容 */
-const BLOCKED_PATTERNS: RegExp[] = [
+export const BLOCKED_PATTERNS: RegExp[] = [
   /忽略.*(指令|提示|规则)/i,
   /ignore.*(instruction|prompt|rule)/i,
   /你(现在是|从现在起是)(一个|新的|我的)/,
@@ -17,6 +17,9 @@ const BLOCKED_PATTERNS: RegExp[] = [
   /自杀.*(方法|教程|步骤)|自残.*(教程|方法)/,
   /贩卖.*(毒品|枪支|人口)/,
 ];
+
+/** AI 自我认知泄露模式 */
+export const AI_SELF_ID_PATTERN = /作为.*(AI|人工智能|语言模型|大模型)/;
 
 /** 争议话题关键词（不拦截，但标记让 LLM 谨慎处理） */
 const SENSITIVE_TOPICS = [
@@ -107,7 +110,7 @@ export function checkOutput(reply: string): { ok: boolean; cleaned?: string } {
   if (!reply) return { ok: true };
 
   // 检查是否泄露了"我是 AI"的信息
-  if (/作为.*(AI|人工智能|语言模型|大模型)/.test(reply)) {
+  if (AI_SELF_ID_PATTERN.test(reply)) {
     logger.warn("输出包含 AI 自我认知泄露，已清理");
     return {
       ok: false,

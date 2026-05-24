@@ -33,6 +33,7 @@ import {
   formatSystemPromptForModel,
 } from "../model-tuning.js";
 import { buildSensoryContext } from "../girlfriend.js";
+import type { LoreBookEntry } from "../lore-book.js";
 
 export interface ContextInput {
   userId: string;
@@ -44,6 +45,10 @@ export interface ContextInput {
   learnedInterests: LearnedInterest[];
   conversationSummary: string | undefined;
   relState: ReturnType<typeof getOrCreateState>;
+  /** Lore Book 激活条目（由 LoreBookManager.activate() 返回） */
+  loreBeforeChar?: LoreBookEntry[];
+  loreAfterChar?: LoreBookEntry[];
+  loreAuthorNote?: LoreBookEntry[];
 }
 
 export interface ContextOutput {
@@ -144,8 +149,25 @@ export function contextStage(input: ContextInput): ContextOutput {
   // 13. 模型格式化
   systemPrompt = formatSystemPromptForModel(systemPrompt, strategy);
 
-  // 14. Author's Note — 最高优先级指令，追加到系统提示词末尾
-  const authorsNote = buildAuthorsNote(session, userMessage);
+  // 14. Lore Book 条目注入
+  const { loreBeforeChar, loreAfterChar, loreAuthorNote } = input;
+  if (loreBeforeChar && loreBeforeChar.length > 0) {
+    const loreText = loreBeforeChar.map((e) => e.content).join("\n\n");
+    systemPrompt = `[相关世界设定]\n${loreText}\n\n${systemPrompt}`;
+    logger.debug(`注入 ${loreBeforeChar.length} 条 Lore Book (before_char)`);
+  }
+  if (loreAfterChar && loreAfterChar.length > 0) {
+    const loreText = loreAfterChar.map((e) => e.content).join("\n\n");
+    systemPrompt += `\n\n[补充设定]\n${loreText}`;
+    logger.debug(`注入 ${loreAfterChar.length} 条 Lore Book (after_char)`);
+  }
+
+  // 15. Author's Note — 最高优先级指令，追加到系统提示词末尾
+  let authorsNote = buildAuthorsNote(session, userMessage);
+  if (loreAuthorNote && loreAuthorNote.length > 0) {
+    const loreNote = loreAuthorNote.map((e) => e.content).join("\n\n");
+    authorsNote = authorsNote ? `${authorsNote}\n\n${loreNote}` : loreNote;
+  }
   if (authorsNote) {
     systemPrompt += "\n\n" + authorsNote;
   }

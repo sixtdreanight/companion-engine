@@ -134,7 +134,8 @@ export function buildMessageHistory(
 // ---- 对话摘要 ----
 
 function summaryPath(userId: string) {
-  return resolve(convDir(), `${userId}.summary.json`);
+  const safeId = sanitizePathId(userId);
+  return resolve(convDir(), `${safeId}.summary.json`);
 }
 
 export function loadSummary(userId: string): string | null {

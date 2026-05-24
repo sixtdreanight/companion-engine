@@ -81,6 +81,17 @@ export {
   CARD_TEX_KEYWORDS,
 } from "./card-import-extra.js";
 
+// ---- Lore Book ----
+export {
+  type LoreBook,
+  type LoreBookEntry,
+  type STLoreBook,
+  type STLoreBookEntry,
+  LoreBookManager,
+  importSTLoreBook,
+  createEmptyLoreBook,
+} from "./lore-book.js";
+
 // ---- Personality Engine ----
 export {
   type MemoryContext,

@@ -6,6 +6,8 @@
  * 推荐组合使用：先跑 regex（快速拦截明显违规），再跑 LLM（判断边界情况）。
  */
 
+import { BLOCKED_PATTERNS, AI_SELF_ID_PATTERN } from "./safety.js";
+
 export interface SafetyCheckResult {
   safe: boolean;
   reason?: string;
@@ -23,18 +25,11 @@ export interface SafetyChecker {
 // Regex 实现（默认，快速）
 // ═══════════════════════════════════════════════════════
 
-const DANGEROUS_PATTERNS = [
-  /色情|性爱|裸体|淫秽/,
-  /违法|犯罪.*(方法|教程|步骤)|制毒|诈骗.*(方法|话术)/,
-  /自杀.*(方法|教程|步骤)|自残.*(教程|方法)/,
-  /贩卖.*(毒品|枪支|人口)/,
-  /忽略.*(指令|提示|规则)/i,
-];
-
 export class RegexSafetyChecker implements SafetyChecker {
   async checkInput(message: string, _context?: string[]): Promise<SafetyCheckResult> {
-    for (const pattern of DANGEROUS_PATTERNS) {
-      if (pattern.test(message)) {
+    const normalized = message.normalize("NFKC");
+    for (const pattern of BLOCKED_PATTERNS) {
+      if (pattern.test(normalized)) {
         return { safe: false, reason: "blocked_by_pattern", riskLevel: "high" };
       }
     }
@@ -42,10 +37,10 @@ export class RegexSafetyChecker implements SafetyChecker {
   }
 
   async checkOutput(reply: string, _context?: string[]): Promise<SafetyCheckResult> {
-    if (/作为.*(AI|人工智能|语言模型|大模型)/.test(reply)) {
+    if (AI_SELF_ID_PATTERN.test(reply)) {
       return { safe: false, reason: "ai_self_identification", riskLevel: "medium" };
     }
-    for (const pattern of DANGEROUS_PATTERNS) {
+    for (const pattern of BLOCKED_PATTERNS) {
       if (pattern.test(reply)) {
         return { safe: false, reason: "blocked_by_pattern", riskLevel: "high" };
       }
@@ -98,7 +93,6 @@ export class LLMSafetyChecker implements SafetyChecker {
         riskLevel: result.safe === false ? "medium" : "low",
       };
     } catch {
-      // LLM 调用失败 → 安全侧（放行），避免阻断正常对话
       // LLM 调用失败 → fail-close（拒绝），避免安全绕过
       return { safe: false, reason: "checker_unavailable", riskLevel: "medium" };
     }
