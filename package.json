@@ -1,6 +1,6 @@
 {
   "name": "@sixtdreamnight/companion-engine",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "AI companion core engine — personality, relationship, memory, safety, pipeline, streaming, emotion model, semantic search",
   "type": "module",
   "scripts": {
