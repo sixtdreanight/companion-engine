@@ -34,5 +34,25 @@
     "access": "public"
   },
   "license": "GPL-3.0",
-  "author": "梦夜十六"
+  "author": "DreamNight",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sixtdreanight/companion-engine.git"
+  },
+  "bugs": {
+    "url": "https://github.com/sixtdreanight/companion-engine/issues"
+  },
+  "homepage": "https://github.com/sixtdreanight/companion-engine#readme",
+  "keywords": [
+    "ai",
+    "companion",
+    "chatbot",
+    "llm",
+    "personality",
+    "relationship",
+    "memory",
+    "emotion",
+    "safety",
+    "typescript"
+  ]
 }
