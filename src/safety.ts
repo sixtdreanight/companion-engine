@@ -137,6 +137,8 @@ export function checkOutput(reply: string): { ok: boolean; cleaned?: string } {
  */
 // ---- 角色设定审核 ----
 
+// NOTE: Hardcoded keyword blocklist is fragile (bypassable via homoglyphs/spacing)
+// and a maintenance burden. For production, use a config-file-based approach.
 const POLITICAL_KEYWORDS = [
   "习近平", "习主席", "李克强", "政治局", "共产党", "中共",
   "六四", "天安门", "法轮功", "台独", "藏独", "疆独",

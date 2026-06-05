@@ -96,12 +96,12 @@ export async function searchWeb(query: string): Promise<string> {
       return "(未找到相关结果)";
     }
 
-    // 格式化为提示词可用的文本
+    // 格式化为提示词可用的文本（先消毒，防止外部内容注入）
     return results
       .map((r) => {
-        let text = r.snippet;
-        if (r.url) text += ` [来源: ${r.url}]`;
-        return text;
+        const safeSnippet = r.snippet.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "").slice(0, 500);
+        const safeUrl = (r.url || "").replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "").slice(0, 500);
+        return `<search_result>${safeSnippet} [来源: ${safeUrl}]</search_result>`;
       })
       .join("\n\n");
   } catch (err) {

@@ -1,8 +1,13 @@
 import { readFileSync, writeFileSync, renameSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { randomBytes } from "node:crypto";
 import { parse as dotenvParse } from "dotenv";
 import { logger } from "./utils.js";
+
+// Try-load electron safeStorage for OS keychain encryption
+let _safeStorage: typeof import("electron").safeStorage | null = null;
+try { _safeStorage = (await import("electron")).safeStorage; } catch { /* not in Electron */ }
 
 // ---- 类型定义 ----
 
@@ -139,10 +144,11 @@ function loadEnvFile(dataRoot: string): void {
     }
     /** 检查是否加载了敏感字段 */
     if (parsed.AI_API_KEY || parsed.ANTHROPIC_API_KEY || parsed.OPENAI_API_KEY) {
-      logger.warn(
-        "API key loaded into process.env via .env — in Electron, extensions can read process.env. " +
-        "Consider using electron.safeStorage for production.",
-      );
+      if (!_safeStorage?.isEncryptionAvailable?.()) {
+        logger.warn(
+          "CRITICAL: API key stored in plaintext. Install electron.safeStorage or use OS keychain for production.",
+        );
+      }
     }
     logger.info(`Loaded .env from ${envPath}`);
   } catch (err) {
@@ -246,10 +252,10 @@ function loadEnvConfig(): { ai: AIConfig; qq: QQConfig; wechat: WeChatConfig } {
 
   if (!apiKey) {
     logger.warn("未设置 AI_API_KEY，AI 功能将不可用");
-  } else {
+  } else if (!_safeStorage?.isEncryptionAvailable?.()) {
     logger.warn(
-      "API key loaded from process.env — in Electron, any extension can read process.env. " +
-      "Consider using electron.safeStorage for production use.",
+      "CRITICAL: API key loaded from plaintext process.env — any Electron extension can read it. " +
+      "Use electron.safeStorage for production.",
     );
   }
 
@@ -345,9 +351,26 @@ export function loadConfig(): AppConfig {
 
 /** Atomic write: write to temp then rename (crash-safe on same filesystem) */
 export function writeFileAtomic(filePath: string, content: string): void {
-  const tmpPath = filePath + ".tmp." + Date.now();
+  const tmpPath = filePath + ".tmp." + randomBytes(4).toString("hex");
   writeFileSync(tmpPath, content, "utf-8");
   renameSync(tmpPath, filePath);
+}
+
+/** Encrypt sensitive value using OS keychain (safeStorage). Returns prefix-tagged string. */
+export function protectSecret(plaintext: string): string {
+  if (!_safeStorage?.isEncryptionAvailable?.()) return plaintext;
+  try {
+    return "safe:" + _safeStorage.encryptString(plaintext).toString("base64");
+  } catch { return plaintext; }
+}
+
+/** Decrypt a value protected by protectSecret. */
+export function revealSecret(protected_: string): string {
+  if (!protected_?.startsWith("safe:")) return protected_ || "";
+  if (!_safeStorage?.isEncryptionAvailable?.()) return protected_.replace("safe:", "");
+  try {
+    return _safeStorage.decryptString(Buffer.from(protected_.slice(5), "base64"));
+  } catch { return protected_.replace("safe:", ""); }
 }
 
 /** 路径 ID 消毒：防止目录穿越攻击 */

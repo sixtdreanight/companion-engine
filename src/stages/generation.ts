@@ -41,7 +41,7 @@ export function createAIProvider(config: AppConfig["ai"]): LanguageModel {
   }
 
   if (provider === "ollama") {
-    const openai = createOpenAI({ apiKey: apiKey || "ollama", baseURL: baseUrl || "http://localhost:11434/v1" });
+    const openai = createOpenAI({ apiKey: apiKey || "", baseURL: baseUrl || "http://localhost:11434/v1" });
     return openai.chat(model);
   }
 

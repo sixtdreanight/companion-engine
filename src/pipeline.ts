@@ -19,10 +19,18 @@ import { preProcessStage } from "./stages/preprocess.js";
 const _msgTimestamps = new Map<string, number>();
 const MIN_MSG_INTERVAL_MS = 500;
 
+const RATE_LIMIT_MAX_ENTRIES = 10000;
+
 function checkRateLimit(userId: string): boolean {
   const now = Date.now();
   const last = _msgTimestamps.get(userId);
   if (last && now - last < MIN_MSG_INTERVAL_MS) return false;
+  // Prevent unbounded map growth under sustained load
+  if (_msgTimestamps.size > RATE_LIMIT_MAX_ENTRIES) {
+    for (const [key, ts] of _msgTimestamps) {
+      if (now - ts > 3600000) _msgTimestamps.delete(key); // 1h TTL
+    }
+  }
   _msgTimestamps.set(userId, now);
   return true;
 }
