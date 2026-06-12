@@ -3,9 +3,20 @@ import { parse as dotenvParse } from "dotenv";
 import { logger } from "./utils.js";
 import { NodeStorage, type StorageAdapter, type KVStore } from "./storage.js";
 
-// Try-load electron safeStorage for OS keychain encryption
+// Lazy-load electron safeStorage for OS keychain encryption.
+// Wrapped in a function to avoid static analysis by bundlers (Rollup/Vite)
+// which would fail on `await import("electron")` outside an Electron context.
 let _safeStorage: typeof import("electron").safeStorage | null = null;
-try { _safeStorage = (await import("electron")).safeStorage; } catch { /* not in Electron */ }
+let _safeStorageLoaded = false;
+async function getSafeStorage() {
+  if (_safeStorageLoaded) return _safeStorage;
+  _safeStorageLoaded = true;
+  try {
+    const electron = await (Function("return import('electron')")()) as typeof import("electron");
+    _safeStorage = electron.safeStorage;
+  } catch { /* not in Electron */ }
+  return _safeStorage;
+}
 
 // ---- 类型定义 ----
 
@@ -162,7 +173,7 @@ async function loadEnvFile(dataRoot: string): Promise<void> {
     }
     /** 检查是否加载了敏感字段 */
     if (parsed.AI_API_KEY || parsed.ANTHROPIC_API_KEY || parsed.OPENAI_API_KEY) {
-      if (!_safeStorage?.isEncryptionAvailable?.()) {
+      if (!(await getSafeStorage())?.isEncryptionAvailable?.()) {
         logger.warn(
           "CRITICAL: API key stored in plaintext. Install electron.safeStorage or use OS keychain for production.",
         );
@@ -256,7 +267,7 @@ function validateProvider(raw: string | undefined, fallback: AIConfig["provider"
 }
 
 /** 从 .env 加载 AI、QQ 和微信配置 */
-function loadEnvConfig(): { ai: AIConfig; qq: QQConfig; wechat: WeChatConfig } {
+async function loadEnvConfig(): Promise<{ ai: AIConfig; qq: QQConfig; wechat: WeChatConfig }> {
   const provider = validateProvider(process.env.AI_PROVIDER, "anthropic");
   const model = process.env.AI_MODEL || "claude-sonnet-4-20250514";
   // SECURITY: process.env is readable by any Electron extension in the renderer.
@@ -269,7 +280,7 @@ function loadEnvConfig(): { ai: AIConfig; qq: QQConfig; wechat: WeChatConfig } {
 
   if (!apiKey) {
     logger.warn("未设置 AI_API_KEY，AI 功能将不可用");
-  } else if (!_safeStorage?.isEncryptionAvailable?.()) {
+  } else if (!(await getSafeStorage())?.isEncryptionAvailable?.()) {
     logger.warn(
       "CRITICAL: API key loaded from plaintext process.env — any Electron extension can read it. " +
       "Use electron.safeStorage for production.",
@@ -352,8 +363,8 @@ export async function loadProfile(): Promise<Profile | null> {
 }
 
 /** 加载完整应用配置 */
-export function loadConfig(): AppConfig {
-  const env = loadEnvConfig();
+export async function loadConfig(): Promise<AppConfig> {
+  const env = await loadEnvConfig();
   const filter = process.env.CONTENT_FILTER as AppConfig["contentFilter"] | undefined;
   return {
     ai: env.ai,
@@ -373,19 +384,21 @@ export async function writeFileAtomic(filePath: string, content: string): Promis
 }
 
 /** Encrypt sensitive value using OS keychain (safeStorage). Returns prefix-tagged string. */
-export function protectSecret(plaintext: string): string {
-  if (!_safeStorage?.isEncryptionAvailable?.()) return plaintext;
+export async function protectSecret(plaintext: string): Promise<string> {
+  const ss = await getSafeStorage();
+  if (!ss?.isEncryptionAvailable?.()) return plaintext;
   try {
-    return "safe:" + _safeStorage.encryptString(plaintext).toString("base64");
+    return "safe:" + ss.encryptString(plaintext).toString("base64");
   } catch { return plaintext; }
 }
 
 /** Decrypt a value protected by protectSecret. */
-export function revealSecret(protected_: string): string {
+export async function revealSecret(protected_: string): Promise<string> {
   if (!protected_?.startsWith("safe:")) return protected_ || "";
-  if (!_safeStorage?.isEncryptionAvailable?.()) return protected_.replace("safe:", "");
+  const ss = await getSafeStorage();
+  if (!ss?.isEncryptionAvailable?.()) return protected_.replace("safe:", "");
   try {
-    return _safeStorage.decryptString(Buffer.from(protected_.slice(5), "base64"));
+    return ss.decryptString(Buffer.from(protected_.slice(5), "base64"));
   } catch { return protected_.replace("safe:", ""); }
 }
 
