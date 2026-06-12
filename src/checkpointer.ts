@@ -7,6 +7,9 @@
 
 import { getDataRoot, sanitizePathId, getStorage } from "./config.js";
 import { logger } from "./utils.js";
+import { Mutex, withLock, getOrCreateMutex } from "./mutex.js";
+
+const _cpMutexes = new Map<string, Mutex>();
 
 export interface Checkpointer<T = unknown> {
   /** 加载指定 key 的状态，不存在则返回 null */
@@ -46,10 +49,13 @@ export class JsonCheckpointer<T = unknown> implements Checkpointer<T> {
   }
 
   async set(key: string, state: T): Promise<void> {
-    const storage = getStorage();
-    if (!(await storage.exists(this.dir))) await storage.mkdir(this.dir, { recursive: true });
-    const path = this.filePath(key);
-    await storage.writeAtomic(path, JSON.stringify(state, null, 2));
+    const mutex = getOrCreateMutex(_cpMutexes, `${this.dir}/${key}`);
+    await withLock(mutex, async () => {
+      const storage = getStorage();
+      if (!(await storage.exists(this.dir))) await storage.mkdir(this.dir, { recursive: true });
+      const path = this.filePath(key);
+      await storage.writeAtomic(path, JSON.stringify(state, null, 2));
+    });
   }
 
   async delete(key: string): Promise<void> {

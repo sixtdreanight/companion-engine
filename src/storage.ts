@@ -7,7 +7,7 @@
  * 所有方法返回 Promise——移动端 I/O 都是异步的，同步是 Node.js 的特权。
  */
 
-import { readFile, writeFile, mkdir, readdir, rm, stat, access } from "node:fs/promises";
+import { readFile, writeFile, mkdir, readdir, rm, stat, access, rename } from "node:fs/promises";
 import { existsSync } from "node:fs";
 
 export interface StorageAdapter {
@@ -66,15 +66,14 @@ export class NodeStorage implements StorageAdapter {
   }
 
   async writeAtomic(path: string, data: string): Promise<void> {
-    const dir = path.replace(/[/][^/]+$/, "");
+    const dir = path.replace(/[/\\][^/\\]+$/, "");
     if (dir && !(await this.exists(dir))) {
       await this.mkdir(dir, { recursive: true });
     }
-    // 先写临时文件，再通过 writeFile 覆盖目标（Node.js writeFile 是原子覆盖）
-    const tmp = path + "." + Date.now() + ".tmp";
+    // Write to temp then rename — rename is atomic on same filesystem (POSIX + NTFS)
+    const tmp = path + "." + process.pid + "." + Date.now() + ".tmp";
     await writeFile(tmp, data, "utf-8");
-    await writeFile(path, data, "utf-8");
-    try { await rm(tmp, { force: true }); } catch { /* tmp 清理失败忽略 */ }
+    await rename(tmp, path);
   }
 }
 

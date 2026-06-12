@@ -29,6 +29,7 @@ export interface PreProcessInput {
   model: LanguageModel;
   config: AppConfig;
   profile: Profile;
+  correlationId?: string;
 }
 
 export interface PreProcessOutput {
@@ -169,7 +170,8 @@ async function generateRefusal(
     });
 
     return result.text || fallbackRefusal();
-  } catch {
+  } catch (err) {
+    logger.warn("Refusal generation failed, using fallback:", err);
     return fallbackRefusal();
   }
 }

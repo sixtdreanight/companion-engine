@@ -4,7 +4,20 @@
  * 管道层检测搜索意图 → 调用搜索 → 结果注入系统提示词
  */
 
+import { z } from "zod";
 import { logger } from "./utils.js";
+import { CircuitBreaker } from "./circuit-breaker.js";
+
+const searchBreaker = new CircuitBreaker(3, 30000, 1);
+
+const DuckDuckGoResponseSchema = z.object({
+  AbstractText: z.string().optional(),
+  AbstractURL: z.string().optional(),
+  RelatedTopics: z.array(z.object({
+    Text: z.string().optional(),
+    FirstURL: z.string().optional(),
+  })).optional(),
+});
 
 export interface SearchResult {
   title: string;
@@ -48,11 +61,8 @@ async function searchDuckDuckGo(query: string): Promise<SearchResult[]> {
       throw new Error(`DuckDuckGo 返回 ${res.status}`);
     }
 
-    const data = (await res.json()) as {
-    AbstractText?: string;
-    AbstractURL?: string;
-    RelatedTopics?: { Text?: string; FirstURL?: string }[];
-  };
+    const raw = await res.json();
+    const data = DuckDuckGoResponseSchema.parse(raw);
 
   const results: SearchResult[] = [];
 
@@ -90,7 +100,10 @@ export async function searchWeb(query: string): Promise<string> {
   logger.info(`搜索: "${query}"`);
 
   try {
-    const results = await searchDuckDuckGo(query);
+    const results = await searchBreaker.call(
+      () => searchDuckDuckGo(query),
+      async () => { throw new Error("搜索熔断器已打开"); },
+    );
 
     if (results.length === 0) {
       return "(未找到相关结果)";
@@ -106,6 +119,6 @@ export async function searchWeb(query: string): Promise<string> {
       .join("\n\n");
   } catch (err) {
     logger.warn("搜索失败:", err);
-    return "(搜索服务暂时不可用)";
+    return "(搜索服务暂时不可用，已跳过搜索)";
   }
 }

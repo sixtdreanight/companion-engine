@@ -28,6 +28,11 @@ jobs:
           mkdir -p data/conversations data/feedback data/relationships
           mkdir -p ../data/conversations ../data/feedback ../data/relationships
           npx vitest run
+      - name: Coverage
+        run: npx vitest run --coverage
+      - name: npm audit
+        run: npm audit --audit-level=high
+        continue-on-error: true
 
   publish:
     needs: test

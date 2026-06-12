@@ -9,9 +9,10 @@
 
 import type { LanguageModel } from "ai";
 import type { AppConfig, Profile } from "./config.js";
-import { logger, recordPipelineMessage, recordPipelineError } from "./utils.js";
+import { logger, createCorrelationId, cidLogger, recordPipelineMessage, recordPipelineError } from "./utils.js";
 import { saveShortTerm } from "./memory.js";
 import { splitForChat } from "./split.js";
+import { checkOutput, fallbackRefusal } from "./safety.js";
 import { preProcessStage } from "./stages/preprocess.js";
 
 // ---- 速率限制 ----
@@ -108,12 +109,14 @@ export async function processMessage(
   userMessage: string,
   ctx: PipelineContext,
 ): Promise<string[]> {
+  const cid = createCorrelationId();
+  const log = cidLogger(cid);
   const { model, config, profile } = ctx;
   const cp = _getCheckpointer(ctx);
   const t0 = Date.now();
 
   if (!checkRateLimit(userId)) {
-    logger.debug(`Rate limited: ${userId}`);
+    log.info(`Rate limited: ${userId}`);
     return ["消息太快了，让我喘口气吧~"];
   }
 
@@ -121,7 +124,7 @@ export async function processMessage(
 
   // Stage 1: PreProcess
   const t1 = Date.now();
-  const pre = await preProcessStage({ userId, userMessage, model, config, profile });
+  const pre = await preProcessStage({ userId, userMessage, model, config, profile, correlationId: cid });
   if (pre.earlyReturn !== null) {
     await saveShortTerm(userId, userMessage, pre.earlyReturn);
     return splitForChat(pre.earlyReturn);
@@ -129,12 +132,26 @@ export async function processMessage(
 
   // Stage 2: Memory — 使用持久化 checkpointer
   const t2 = Date.now();
-  const prevState = await getSummaryState(userId, cp);
-  const mem = await memoryStage(
-    { userId, userMessage, model, config },
-    prevState,
-  );
-  await setSummaryState(userId, mem.summaryState, cp);
+  let prevState = await getSummaryState(userId, cp);
+  let mem: Awaited<ReturnType<typeof memoryStage>>;
+  try {
+    mem = await memoryStage(
+      { userId, userMessage, model, config, correlationId: cid },
+      prevState,
+    );
+    await setSummaryState(userId, mem.summaryState, cp);
+  } catch (err) {
+    log.error("Memory stage failed, using empty memory:", err);
+    recordPipelineError("memory_stage_failed");
+    mem = {
+      history: [],
+      memoryContext: { highConfidence: [], mediumConfidence: [] },
+      learnedInterests: [],
+      conversationSummary: undefined,
+      fullHistory: [],
+      summaryState: prevState || { totalTurns: 1, lastSummaryTurn: 0 },
+    };
+  }
 
   // Stage 3-5: 同前
   const t3 = Date.now();
@@ -145,6 +162,7 @@ export async function processMessage(
     learnedInterests: mem.learnedInterests,
     conversationSummary: mem.conversationSummary,
     relState: pre.relState,
+    correlationId: cid,
   });
 
   const t4 = Date.now();
@@ -156,6 +174,7 @@ export async function processMessage(
     config,
     authorsNote: ctxOut.authorsNote,
     authorNotePosition: ctxOut.authorNotePosition,
+    correlationId: cid,
   });
 
   const t5 = Date.now();
@@ -167,11 +186,12 @@ export async function processMessage(
     config,
     profile,
     totalTurns: mem.summaryState.totalTurns,
+    correlationId: cid,
   });
   const t6 = Date.now();
 
   const totalMs = t6 - t0;
-  logger.debug(
+  log.info(
     `Pipeline: pre=${t2 - t1}ms mem=${t3 - t2}ms ctx=${t4 - t3}ms gen=${t5 - t4}ms post=${t6 - t5}ms total=${totalMs}ms`,
   );
   recordPipelineMessage(totalMs);
@@ -189,13 +209,15 @@ export async function* processMessageStream(
   userMessage: string,
   ctx: PipelineContext,
 ): AsyncGenerator<string, void, void> {
+  const cid = createCorrelationId();
+  const log = cidLogger(cid);
   const { model, config, profile } = ctx;
   const cp = _getCheckpointer(ctx);
 
   cleanupSessions();
 
   // Stage 1: PreProcess
-  const pre = await preProcessStage({ userId, userMessage, model, config, profile });
+  const pre = await preProcessStage({ userId, userMessage, model, config, profile, correlationId: cid });
   if (pre.earlyReturn !== null) {
     await saveShortTerm(userId, userMessage, pre.earlyReturn);
     for (const bubble of splitForChat(pre.earlyReturn)) {
@@ -207,7 +229,7 @@ export async function* processMessageStream(
   // Stage 2: Memory
   const prevState = await getSummaryState(userId, cp);
   const mem = await memoryStage(
-    { userId, userMessage, model, config },
+    { userId, userMessage, model, config, correlationId: cid },
     prevState,
   );
   await setSummaryState(userId, mem.summaryState, cp);
@@ -220,6 +242,7 @@ export async function* processMessageStream(
     learnedInterests: mem.learnedInterests,
     conversationSummary: mem.conversationSummary,
     relState: pre.relState,
+    correlationId: cid,
   });
 
   // Stage 4: Generation — 流式
@@ -244,10 +267,21 @@ export async function* processMessageStream(
       reply += chunk;
       yield chunk;
     }
-  } catch {
+  } catch (err) {
+    log.error("Stream generation failed:", err);
+    recordPipelineError("stream_generation_failed");
     const fallback = "呜...刚才走神了，再说一遍好吗？(｡•́︿•̀｡)";
     reply = fallback;
     yield fallback;
+  }
+
+  // Stage 4b: Output safety check (best-effort in streaming mode)
+  const outputCheck = checkOutput(reply);
+  if (!outputCheck.ok) {
+    log.warn("Streaming output required safety correction");
+    reply = outputCheck.cleaned !== undefined && outputCheck.cleaned !== ""
+      ? outputCheck.cleaned
+      : fallbackRefusal();
   }
 
   // Stage 5: PostProcess
@@ -259,5 +293,6 @@ export async function* processMessageStream(
     config,
     profile,
     totalTurns: mem.summaryState.totalTurns,
+    correlationId: cid,
   });
 }

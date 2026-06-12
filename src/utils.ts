@@ -11,6 +11,7 @@ type LogLevel = (typeof LOG_LEVELS)[number];
 
 let currentLevel: LogLevel = "info";
 let logFilePath: string | null = null;
+let jsonMode = false;
 const MAX_LOG_SIZE = 5 * 1024 * 1024; // 5 MB 轮转
 
 // 异步日志缓冲：避免每次写日志都 await
@@ -20,6 +21,11 @@ let flushTimer: ReturnType<typeof setTimeout> | null = null;
 /** 设置日志级别 */
 export function setLogLevel(level: LogLevel) {
   currentLevel = level;
+}
+
+/** Enable JSON structured log format (opt-in, default false) */
+export function setLogJson(enabled: boolean) {
+  jsonMode = enabled;
 }
 
 /** 启用文件日志输出 */
@@ -40,6 +46,14 @@ function timestamp(): string {
 }
 
 function formatLine(level: string, cid: string | undefined, msg: string): string {
+  if (jsonMode) {
+    return JSON.stringify({
+      ts: new Date().toISOString(),
+      level: level.trim(),
+      cid: cid || "",
+      msg,
+    });
+  }
   const ts = timestamp();
   const prefix = cid ? `[${ts}] ${level} [${cid}]` : `[${ts}] ${level}`;
   return `${prefix} ${msg}`;

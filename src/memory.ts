@@ -8,6 +8,12 @@
 
 import { getDataRoot, getStorage, sanitizePathId } from "./config.js";
 import { logger, retry } from "./utils.js";
+import { Mutex, withLock, getOrCreateMutex } from "./mutex.js";
+
+// Shared mutexes for files accessed by multiple callers
+const _ltmMutex = new Mutex();
+const _learnedMutex = new Mutex();
+const _convMutexes = new Map<string, Mutex>();
 
 // ---- 类型 ----
 
@@ -87,32 +93,38 @@ export async function loadShortTerm(userId: string, maxTurns: number): Promise<C
  * 安全做法：读取当前数组 → 追加新消息 → 原子写入
  */
 export async function saveShortTerm(userId: string, userMsg: string, assistantMsg: string): Promise<void> {
-  await ensureDirs();
   const safeId = sanitizePathId(userId);
-  const filePath = [convDir(), `${safeId}.json`].join("/").replace(/\/+/g, "/");
-  const now = new Date().toISOString();
-  const userTurn = { role: "user" as const, content: userMsg, timestamp: now };
-  const assistantTurn = { role: "assistant" as const, content: assistantMsg, timestamp: now };
+  const mutex = getOrCreateMutex(_convMutexes, safeId);
+  await withLock(mutex, async () => {
+    await ensureDirs();
+    const filePath = [convDir(), `${safeId}.json`].join("/").replace(/\/+/g, "/");
+    const now = new Date().toISOString();
+    const userTurn = { role: "user" as const, content: userMsg, timestamp: now };
+    const assistantTurn = { role: "assistant" as const, content: assistantMsg, timestamp: now };
 
-  const history = await loadShortTerm(userId, 9999);
-  history.push(userTurn, assistantTurn);
-  await getStorage().writeAtomic(filePath, JSON.stringify(history, null, 2) + "\n");
+    const history = await loadShortTerm(userId, 9999);
+    history.push(userTurn, assistantTurn);
+    await getStorage().writeAtomic(filePath, JSON.stringify(history, null, 2) + "\n");
+  });
 }
 
 /**
  * 移除最后一轮对话（user+assistant），返回被移除的用户消息。
  */
 export async function removeLastTurn(userId: string): Promise<string | null> {
-  await ensureDirs();
-  const history = await loadShortTerm(userId, 9999);
-  if (history.length < 2) return null;
-  const lastAssistant = history[history.length - 1];
-  const lastUser = history[history.length - 2];
-  if (lastAssistant.role !== "assistant" || lastUser.role !== "user") return null;
-  history.splice(-2, 2);
   const safeId = sanitizePathId(userId);
-  await getStorage().writeAtomic([convDir(), `${safeId}.json`].join("/").replace(/\/+/g, "/"), JSON.stringify(history, null, 2));
-  return lastUser.content;
+  const mutex = getOrCreateMutex(_convMutexes, safeId);
+  return withLock(mutex, async () => {
+    await ensureDirs();
+    const history = await loadShortTerm(userId, 9999);
+    if (history.length < 2) return null;
+    const lastAssistant = history[history.length - 1];
+    const lastUser = history[history.length - 2];
+    if (lastAssistant.role !== "assistant" || lastUser.role !== "user") return null;
+    history.splice(-2, 2);
+    await getStorage().writeAtomic([convDir(), `${safeId}.json`].join("/").replace(/\/+/g, "/"), JSON.stringify(history, null, 2));
+    return lastUser.content;
+  });
 }
 
 /**
@@ -182,134 +194,142 @@ async function saveLongTerm(memory: LongTermMemory) {
  * 更新长期记忆中的事实
  */
 export async function updateFact(topic: string, content: string) {
-  const memory = await loadLongTerm();
-  const existing = memory.facts.find(
-    (f) => f.topic === topic || f.content.includes(content.slice(0, 10)),
-  );
+  await withLock(_ltmMutex, async () => {
+    const memory = await loadLongTerm();
+    const existing = memory.facts.find(
+      (f) => f.topic === topic || f.content.includes(content.slice(0, 10)),
+    );
 
-  if (existing) {
-    existing.mentions += 1;
-    existing.lastMentioned = new Date().toISOString();
-    existing.content = content;
-    if (existing.mentions >= 5) existing.confidence = "high";
-    else if (existing.mentions >= 3) existing.confidence = "medium";
-    else existing.confidence = "low";
-    existing.importance = Math.min(1.0, (existing.importance ?? 0.5) + 0.05);
-    logger.debug(`长期记忆更新: ${topic} (提及 ${existing.mentions} 次)`);
-  } else {
-    memory.facts.push({
-      topic,
-      content,
-      mentions: 1,
-      firstMentioned: new Date().toISOString(),
-      lastMentioned: new Date().toISOString(),
-      confidence: "low",
-      importance: 0.5,
-      lastAccess: new Date().toISOString(),
-    });
-    logger.debug(`长期记忆新增: ${topic}`);
-  }
+    if (existing) {
+      existing.mentions += 1;
+      existing.lastMentioned = new Date().toISOString();
+      existing.content = content;
+      if (existing.mentions >= 5) existing.confidence = "high";
+      else if (existing.mentions >= 3) existing.confidence = "medium";
+      else existing.confidence = "low";
+      existing.importance = Math.min(1.0, (existing.importance ?? 0.5) + 0.05);
+      logger.debug(`长期记忆更新: ${topic} (提及 ${existing.mentions} 次)`);
+    } else {
+      memory.facts.push({
+        topic,
+        content,
+        mentions: 1,
+        firstMentioned: new Date().toISOString(),
+        lastMentioned: new Date().toISOString(),
+        confidence: "low",
+        importance: 0.5,
+        lastAccess: new Date().toISOString(),
+      });
+      logger.debug(`长期记忆新增: ${topic}`);
+    }
 
-  await saveLongTerm(memory);
+    await saveLongTerm(memory);
+  });
 }
 
 /**
  * 应用艾宾浩斯遗忘曲线
  */
 export async function applyForgettingCurve() {
-  const memory = await loadLongTerm();
-  const now = Date.now();
-  const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
-  const SIXTY_DAYS = 60 * 24 * 60 * 60 * 1000;
+  await withLock(_ltmMutex, async () => {
+    const memory = await loadLongTerm();
+    const now = Date.now();
+    const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
+    const SIXTY_DAYS = 60 * 24 * 60 * 60 * 1000;
 
-  const before = memory.facts.length;
+    const before = memory.facts.length;
 
-  memory.facts = memory.facts.filter((fact) => {
-    const importance = fact.importance ?? 0.5;
-    let scale = 1;
-    if (importance > 0.7) scale = 2;
-    else if (importance < 0.3) scale = 0.5;
+    memory.facts = memory.facts.filter((fact) => {
+      const importance = fact.importance ?? 0.5;
+      let scale = 1;
+      if (importance > 0.7) scale = 2;
+      else if (importance < 0.3) scale = 0.5;
 
-    const degradeThreshold = THIRTY_DAYS * scale;
-    const deleteThreshold = SIXTY_DAYS * scale;
+      const degradeThreshold = THIRTY_DAYS * scale;
+      const deleteThreshold = SIXTY_DAYS * scale;
 
-    const lastMentioned = new Date(fact.lastMentioned).getTime();
-    const elapsed = now - lastMentioned;
+      const lastMentioned = new Date(fact.lastMentioned).getTime();
+      const elapsed = now - lastMentioned;
 
-    if (elapsed > deleteThreshold) {
-      logger.debug(`遗忘: ${fact.topic} (超过${Math.round(deleteThreshold / (24 * 60 * 60 * 1000))}天未提及, importance=${importance.toFixed(2)})`);
-      return false;
+      if (elapsed > deleteThreshold) {
+        logger.debug(`遗忘: ${fact.topic} (超过${Math.round(deleteThreshold / (24 * 60 * 60 * 1000))}天未提及, importance=${importance.toFixed(2)})`);
+        return false;
+      }
+      if (elapsed > degradeThreshold && fact.confidence === "high") {
+        fact.confidence = "medium";
+        fact.importance = Math.max(0, importance - 0.1);
+        logger.debug(`记忆降级: ${fact.topic} (超过${Math.round(degradeThreshold / (24 * 60 * 60 * 1000))}天未提及)`);
+      }
+      return true;
+    });
+
+    if (before !== memory.facts.length) {
+      await saveLongTerm(memory);
     }
-    if (elapsed > degradeThreshold && fact.confidence === "high") {
-      fact.confidence = "medium";
-      fact.importance = Math.max(0, importance - 0.1);
-      logger.debug(`记忆降级: ${fact.topic} (超过${Math.round(degradeThreshold / (24 * 60 * 60 * 1000))}天未提及)`);
-    }
-    return true;
   });
-
-  if (before !== memory.facts.length) {
-    await saveLongTerm(memory);
-  }
 }
 
 /**
  * 构建注入提示词的记忆上下文 — 三维评分排序
  */
 export async function buildMemoryContext(maxFacts = 5, userQuery?: string): Promise<MemoryContext> {
-  const memory = await loadLongTerm();
-  const now = Date.now();
+  return withLock(_ltmMutex, async () => {
+    const memory = await loadLongTerm();
+    const now = Date.now();
 
-  const score = (f: Fact): number => {
-    let relevance = 0.5;
-    if (userQuery) {
-      relevance = topicRelevance(f, userQuery);
+    const score = (f: Fact): number => {
+      let relevance = 0.5;
+      if (userQuery) {
+        relevance = topicRelevance(f, userQuery);
+      }
+      const recency = expRecencyDecay(f.lastAccess || f.lastMentioned, now);
+      const importance = f.importance ?? 0.5;
+      return 0.4 * relevance + 0.3 * recency + 0.3 * importance;
+    };
+
+    const sorted = [...memory.facts].sort((a, b) => score(b) - score(a));
+
+    const selectedHigh = sorted.filter((f) => f.confidence === "high").slice(0, maxFacts);
+    const selectedMedium = sorted.filter((f) => f.confidence === "medium").slice(0, maxFacts);
+    const selected = [...selectedHigh, ...selectedMedium];
+
+    for (const fact of selected) {
+      fact.lastAccess = new Date().toISOString();
     }
-    const recency = expRecencyDecay(f.lastAccess || f.lastMentioned, now);
-    const importance = f.importance ?? 0.5;
-    return 0.4 * relevance + 0.3 * recency + 0.3 * importance;
-  };
+    if (selected.length > 0) await saveLongTerm(memory);
 
-  const sorted = [...memory.facts].sort((a, b) => score(b) - score(a));
-
-  const selectedHigh = sorted.filter((f) => f.confidence === "high").slice(0, maxFacts);
-  const selectedMedium = sorted.filter((f) => f.confidence === "medium").slice(0, maxFacts);
-  const selected = [...selectedHigh, ...selectedMedium];
-
-  for (const fact of selected) {
-    fact.lastAccess = new Date().toISOString();
-  }
-  if (selected.length > 0) await saveLongTerm(memory);
-
-  return {
-    highConfidence: selectedHigh.map((f) => f.content),
-    mediumConfidence: selectedMedium.map((f) => f.content),
-  };
+    return {
+      highConfidence: selectedHigh.map((f) => f.content),
+      mediumConfidence: selectedMedium.map((f) => f.content),
+    };
+  });
 }
 
 /**
  * 多维度记忆评分 — 用于检索与当前查询最相关的记忆
  */
 export async function scoreMemoryFacts(userId: string, query: string, topN = 5): Promise<Fact[]> {
-  const memory = await loadLongTerm();
-  const now = Date.now();
+  return withLock(_ltmMutex, async () => {
+    const memory = await loadLongTerm();
+    const now = Date.now();
 
-  const scored = memory.facts.map((fact) => {
-    const relevance = topicRelevance(fact, query);
-    const recency = expRecencyDecay(fact.lastAccess || fact.lastMentioned, now);
-    const importance = fact.importance ?? 0.5;
-    return { fact, score: 0.4 * relevance + 0.3 * recency + 0.3 * importance };
+    const scored = memory.facts.map((fact) => {
+      const relevance = topicRelevance(fact, query);
+      const recency = expRecencyDecay(fact.lastAccess || fact.lastMentioned, now);
+      const importance = fact.importance ?? 0.5;
+      return { fact, score: 0.4 * relevance + 0.3 * recency + 0.3 * importance };
+    });
+
+    scored.sort((a, b) => b.score - a.score);
+
+    const top = scored.slice(0, topN).map((s) => s.fact);
+    for (const fact of top) {
+      fact.lastAccess = new Date().toISOString();
+    }
+    if (top.length > 0) await saveLongTerm(memory);
+
+    return top;
   });
-
-  scored.sort((a, b) => b.score - a.score);
-
-  const top = scored.slice(0, topN).map((s) => s.fact);
-  for (const fact of top) {
-    fact.lastAccess = new Date().toISOString();
-  }
-  if (top.length > 0) await saveLongTerm(memory);
-
-  return top;
 }
 
 // ---- 评分辅助函数 ----
@@ -355,14 +375,16 @@ function expRecencyDecay(lastTimestamp: string, now: number): number {
 // ---- 重要性调整（反馈闭环） ----
 
 export async function deleteFact(topic: string): Promise<void> {
-  const memory = await loadLongTerm();
-  const before = memory.facts.length;
-  memory.facts = memory.facts.filter((f) => f.topic !== topic);
-  if (memory.facts.length !== before) {
-    memory.lastUpdated = new Date().toISOString();
-    await getStorage().writeAtomic(ltmPath(), JSON.stringify(memory, null, 2));
-    logger.debug(`记忆删除: ${topic}`);
-  }
+  await withLock(_ltmMutex, async () => {
+    const memory = await loadLongTerm();
+    const before = memory.facts.length;
+    memory.facts = memory.facts.filter((f) => f.topic !== topic);
+    if (memory.facts.length !== before) {
+      memory.lastUpdated = new Date().toISOString();
+      await saveLongTerm(memory);
+      logger.debug(`记忆删除: ${topic}`);
+    }
+  });
 }
 
 export async function adjustFactImportance(
@@ -370,22 +392,24 @@ export async function adjustFactImportance(
   delta: number,
   newContent?: string,
 ): Promise<void> {
-  const memory = await loadLongTerm();
-  const fact = memory.facts.find(
-    (f) => f.topic === topic || f.content.includes(topic.slice(0, 10)),
-  );
-  if (!fact) return;
+  await withLock(_ltmMutex, async () => {
+    const memory = await loadLongTerm();
+    const fact = memory.facts.find(
+      (f) => f.topic === topic || f.content.includes(topic.slice(0, 10)),
+    );
+    if (!fact) return;
 
-  fact.importance = Math.max(0, Math.min(1, (fact.importance ?? 0.5) + delta));
-  if (newContent) {
-    fact.content = newContent;
-    fact.mentions += 1;
-    fact.lastMentioned = new Date().toISOString();
-  }
-  fact.lastAccess = new Date().toISOString();
+    fact.importance = Math.max(0, Math.min(1, (fact.importance ?? 0.5) + delta));
+    if (newContent) {
+      fact.content = newContent;
+      fact.mentions += 1;
+      fact.lastMentioned = new Date().toISOString();
+    }
+    fact.lastAccess = new Date().toISOString();
 
-  await saveLongTerm(memory);
-  logger.debug(`记忆重要性调整: ${topic} ${delta >= 0 ? "+" : ""}${delta} → ${fact.importance.toFixed(2)}`);
+    await saveLongTerm(memory);
+    logger.debug(`记忆重要性调整: ${topic} ${delta >= 0 ? "+" : ""}${delta} → ${fact.importance.toFixed(2)}`);
+  });
 }
 
 export async function extractFactsFromConversation(
@@ -454,7 +478,9 @@ export async function loadLearnedInterests(): Promise<LearnedInterests> {
 }
 
 async function saveLearnedInterests(data: LearnedInterests) {
-  await getStorage().writeAtomic(learnedPath(), JSON.stringify(data, null, 2));
+  await withLock(_learnedMutex, () =>
+    getStorage().writeAtomic(learnedPath(), JSON.stringify(data, null, 2))
+  );
 }
 
 export async function analyzeUserInterests(

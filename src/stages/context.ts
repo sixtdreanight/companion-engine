@@ -45,6 +45,7 @@ export interface ContextInput {
   learnedInterests: LearnedInterest[];
   conversationSummary: string | undefined;
   relState: RelationshipState;
+  correlationId?: string;
   /** Lore Book 激活条目（由 LoreBookManager.activate() 返回） */
   loreBeforeChar?: LoreBookEntry[];
   loreAfterChar?: LoreBookEntry[];

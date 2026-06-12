@@ -8,6 +8,9 @@
 import { getDataRoot, getStorage } from "./config.js";
 import { logger } from "./utils.js";
 import { adjustFactImportance, loadLongTerm } from "./memory.js";
+import { Mutex, withLock, getOrCreateMutex } from "./mutex.js";
+
+const _feedbackMutexes = new Map<string, Mutex>();
 
 export interface FeedbackEntry {
   type: "thumbs_up" | "thumbs_down" | "correction";
@@ -46,7 +49,10 @@ export async function saveFeedback(
   }
   list.push(entry);
   if (list.length > MAX_FEEDBACK) list = list.slice(-MAX_FEEDBACK);
-  await storage.writeAtomic(file, JSON.stringify(list, null, 2) + "\n");
+  const mutex = getOrCreateMutex(_feedbackMutexes, userId);
+  await withLock(mutex, () =>
+    storage.writeAtomic(file, JSON.stringify(list, null, 2) + "\n")
+  );
 
   // 反馈闭环 → 调整记忆重要性
   try {

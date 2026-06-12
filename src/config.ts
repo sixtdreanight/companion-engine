@@ -111,6 +111,10 @@ export interface AppConfig {
   };
   contentFilter: "strict" | "moderate" | "off";
   topicSelfCheck: boolean;
+  /** Optional: enable LLM-based safety checker (slow but more accurate) */
+  safety?: {
+    useLlmChecker?: boolean;
+  };
 }
 
 const __dirname_pattern = "/src";
@@ -291,7 +295,7 @@ async function loadEnvConfig(): Promise<{ ai: AIConfig; qq: QQConfig; wechat: We
     ai: {
       provider,
       model,
-      apiKey,
+      apiKey: await protectSecret(apiKey),
       baseUrl: process.env.AI_BASE_URL,
       maxTokens: Number(process.env.AI_MAX_TOKENS) || 2048,
       temperature: Number(process.env.AI_TEMPERATURE) || 0.85,

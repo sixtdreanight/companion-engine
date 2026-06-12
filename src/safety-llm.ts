@@ -7,6 +7,7 @@
  */
 
 import { BLOCKED_PATTERNS, AI_SELF_ID_PATTERN } from "./safety.js";
+import { logger } from "./utils.js";
 
 export interface SafetyCheckResult {
   safe: boolean;
@@ -68,6 +69,7 @@ export interface LLMSafetyCheckerOptions {
   generateText: (systemPrompt: string, userMessage: string) => Promise<string>;
 }
 
+/** @deprecated Not wired into the pipeline. Use RegexSafetyChecker directly or wire via AppConfig.safety.useLlmChecker. */
 export class LLMSafetyChecker implements SafetyChecker {
   private generateText: LLMSafetyCheckerOptions["generateText"];
 
@@ -92,8 +94,8 @@ export class LLMSafetyChecker implements SafetyChecker {
         reason: result.reason,
         riskLevel: result.safe === false ? "medium" : "low",
       };
-    } catch {
-      // LLM 调用失败 → fail-close（拒绝），避免安全绕过
+    } catch (err) {
+      logger.warn("LLM safety check failed, fail-close:", err);
       return { safe: false, reason: "checker_unavailable", riskLevel: "medium" };
     }
   }
@@ -116,6 +118,7 @@ export class LLMSafetyChecker implements SafetyChecker {
  * Regex 通过但可疑 → 交给 LLM 判断；
  * LLM 不可用 → 以 Regex 结果为准。
  */
+/** @deprecated Not wired into the pipeline. Use RegexSafetyChecker directly or wire via AppConfig.safety.useLlmChecker. */
 export class CompositeSafetyChecker implements SafetyChecker {
   private regex = new RegexSafetyChecker();
   private llm: LLMSafetyChecker | null;

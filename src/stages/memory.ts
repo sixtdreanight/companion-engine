@@ -28,6 +28,7 @@ export interface MemoryInput {
   userMessage?: string;
   model: LanguageModel;
   config: AppConfig;
+  correlationId?: string;
 }
 
 export interface MemoryOutput {

@@ -7,6 +7,9 @@
 
 import { getDataRoot, getStorage } from "./config.js";
 import { getDateInTimezone, pickRandom } from "./utils.js";
+import { Mutex, withLock } from "./mutex.js";
+
+const _emotionMutex = new Mutex();
 
 // ---- 类型 ----
 
@@ -181,7 +184,9 @@ function emotionPath(): string {
 }
 
 export async function saveEmotionState(state: EmotionState): Promise<void> {
-  await getStorage().writeAtomic(emotionPath(), JSON.stringify(state, null, 2));
+  await withLock(_emotionMutex, () =>
+    getStorage().writeAtomic(emotionPath(), JSON.stringify(state, null, 2))
+  );
 }
 
 export async function loadEmotionState(): Promise<EmotionState | null> {

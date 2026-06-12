@@ -18,6 +18,7 @@ export interface PostProcessInput {
   config: AppConfig;
   profile: Profile;
   totalTurns: number;
+  correlationId?: string;
 }
 
 export async function postProcessStage(input: PostProcessInput): Promise<string[]> {

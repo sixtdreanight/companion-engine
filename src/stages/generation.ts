@@ -6,8 +6,9 @@ import { generateText } from "ai";
 import type { LanguageModel } from "ai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
+import { revealSecret } from "../config.js";
 import type { AppConfig } from "../config.js";
-import { logger, retry } from "../utils.js";
+import { logger, retry, recordPipelineError } from "../utils.js";
 import { checkOutput, fallbackRefusal } from "../safety.js";
 import { getModelStrategy } from "../model-strategy.js";
 
@@ -19,6 +20,7 @@ export interface GenerationInput {
   config: AppConfig;
   authorsNote?: string | null;
   authorNotePosition?: "system-start" | "pre-user";
+  correlationId?: string;
 }
 
 export interface GenerationOutput {
@@ -27,8 +29,9 @@ export interface GenerationOutput {
 
 // ---- AI 提供商工厂 ----
 
-export function createAIProvider(config: AppConfig["ai"]): LanguageModel {
-  const { provider, model, apiKey, baseUrl } = config;
+export async function createAIProvider(config: AppConfig["ai"]): Promise<LanguageModel> {
+  const { provider, model, baseUrl } = config;
+  const apiKey = await revealSecret(config.apiKey);
 
   if (provider === "anthropic") {
     const anthropic = createAnthropic({ apiKey });
@@ -90,7 +93,7 @@ async function generateReplyWithBackup(
     const bak = config.ai;
     if (!bak.backupModel && !bak.backupProvider) throw err;
     try {
-      const backupModel = createAIProvider({
+      const backupModel = await createAIProvider({
         provider: bak.backupProvider || bak.provider,
         model: bak.backupModel || bak.model,
         apiKey: bak.backupApiKey || bak.apiKey,
@@ -121,7 +124,9 @@ export async function generationStage(input: GenerationInput): Promise<Generatio
   let reply: string;
   try {
     reply = await generateReplyWithBackup(model, effectiveSystemPrompt, messages, userMessage, config);
-  } catch {
+  } catch (err) {
+    logger.error("Generation failed, returning fallback:", err);
+    recordPipelineError("generation_failed");
     return { reply: "呜...刚才走神了，再说一遍好吗？(｡•́︿•̀｡)" };
   }
 
@@ -157,8 +162,8 @@ export async function generationStage(input: GenerationInput): Promise<Generatio
           logger.warn("重试生成失败，使用原回复");
         }
       }
-    } catch {
-      // 自检失败不影响主流程
+    } catch (err) {
+      logger.warn("Topic self-check failed, using original reply:", err);
     }
   }
   } // topicSelfCheck

@@ -11,6 +11,9 @@
 import { getDataRoot, getStorage, sanitizePathId } from "./config.js";
 import type { RelationshipMode, RelationshipStage } from "./config.js";
 import { logger } from "./utils.js";
+import { Mutex, withLock, getOrCreateMutex } from "./mutex.js";
+
+const _relMutexes = new Map<string, Mutex>();
 
 // ---- 类型 ----
 
@@ -109,7 +112,11 @@ export async function loadRelationshipState(characterId?: string): Promise<Relat
 
 /** 保存关系状态 */
 export async function saveRelationshipState(state: RelationshipState, characterId?: string): Promise<void> {
-  await getStorage().writeAtomic(relationshipPath(characterId), JSON.stringify(state, null, 2));
+  const key = characterId || "default";
+  const mutex = getOrCreateMutex(_relMutexes, key);
+  await withLock(mutex, () =>
+    getStorage().writeAtomic(relationshipPath(characterId), JSON.stringify(state, null, 2))
+  );
 }
 
 /** 获取或初始化关系状态 */
