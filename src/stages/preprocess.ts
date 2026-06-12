@@ -20,6 +20,7 @@ import {
   stayFriends,
   saveRelationshipState,
   STAGE_LABELS,
+  type RelationshipState,
 } from "../relationship.js";
 
 export interface PreProcessInput {
@@ -36,14 +37,14 @@ export interface PreProcessOutput {
   /** 搜索结果文本，undefined 表示无需搜索或搜索失败 */
   searchResults: string | undefined;
   /** 关系状态（用于后续阶段注入行为指引） */
-  relState: ReturnType<typeof getOrCreateState>;
+  relState: RelationshipState;
 }
 
 export async function preProcessStage(input: PreProcessInput): Promise<PreProcessOutput> {
   const { userId, userMessage, model, config, profile } = input;
 
   // 1. 关系状态机（提前加载，避免重复磁盘I/O）
-  const relState = getOrCreateState(profile.relationship_mode);
+  const relState = await getOrCreateState(profile.relationship_mode);
 
   // 2. 安全检查
   const safetyResult = checkInput(userMessage, config.contentFilter);
@@ -51,13 +52,13 @@ export async function preProcessStage(input: PreProcessInput): Promise<PreProces
     const refusal = await generateRefusal(model, profile, safetyResult.reason || "illegal");
     return { earlyReturn: refusal, searchResults: undefined, relState };
   }
-  const relationReply = handleRelationshipFlow(userMessage, profile, relState);
+  const relationReply = await handleRelationshipFlow(userMessage, profile, relState);
   if (relationReply !== null) return { earlyReturn: relationReply, searchResults: undefined, relState };
 
   // 3. 好感度更新
   if (relState.mode === "slow_burn" && relState.stage !== "lover") {
     const delta = calculateAffectionDelta(userMessage, []);
-    updateAffection(relState, delta);
+    await updateAffection(relState, delta);
   }
 
   // 4. 联网搜索
@@ -73,11 +74,11 @@ export async function preProcessStage(input: PreProcessInput): Promise<PreProces
 
 // ---- 关系状态机（从 pipeline.ts 提取） ----
 
-function handleRelationshipFlow(
+async function handleRelationshipFlow(
   userMessage: string,
   profile: Profile,
-  relState: ReturnType<typeof getOrCreateState>,
-): string | null {
+  relState: RelationshipState,
+): Promise<string | null> {
   // 用户告白
   if (/(告白|表白|(?<!不)我喜欢你|(?<!不)我爱你|在一起|做我(女朋友|男朋友)|交往)/.test(userMessage)) {
     if (relState.stage === "lover") {
@@ -86,7 +87,7 @@ function handleRelationshipFlow(
     if (profile.relationship_mode === "direct") {
       return `我们已经在一起了呀，${profile.user_nickname}~`;
     }
-    const result = handleConfession(relState);
+    const result = await handleConfession(relState);
     if (result.success) {
       logger.info(`告白成功! 阶段: ${STAGE_LABELS[relState.stage]}`);
       return result.message;
@@ -98,22 +99,22 @@ function handleRelationshipFlow(
 
   // 删好友
   if (/删好友/.test(userMessage)) {
-    if (relState.breakupPending) { executeBreakup(relState); return "好的...那就这样吧。再见。"; }
+    if (relState.breakupPending) { await executeBreakup(relState); return "好的...那就这样吧。再见。"; }
     if (relState.confessions.length > 0 && !relState.confessions[relState.confessions.length - 1].success) {
-      executeBreakup(relState);
+      await executeBreakup(relState);
       return "嗯...我尊重你的选择。谢谢你曾经喜欢过我。再见。";
     }
     return "你确定要删除我吗？这之后我们就不会再聊天了。如果确定的话，再发一次「确认删除」。";
   }
 
   if (/确认删除/.test(userMessage)) {
-    executeBreakup(relState);
+    await executeBreakup(relState);
     return "好的。祝你一切都好。再见。";
   }
 
   // 越线检测
   if (checkBoundaryViolation(userMessage)) {
-    const boundary = handleBoundaryViolation(relState);
+    const boundary = await handleBoundaryViolation(relState);
     if (boundary.shouldBreakup) {
       return boundary.warningMessage +
         "\n\n[提示] 这是最后一次警告。你可以选择: 发送「我改」来挽回 / 发送「分手吧」结束关系";
@@ -134,14 +135,14 @@ function handleRelationshipFlow(
   }
 
   if (/做朋友/.test(userMessage) && relState.breakupPending) {
-    stayFriends(relState);
+    await stayFriends(relState);
     return "好...做朋友也好。谢谢你。我们重新开始吧，以朋友的身份。";
   }
 
   if (/我改/.test(userMessage) && relState.breakupPending) {
     relState.breakupPending = false;
     relState.boundaryWarnings = Math.max(0, relState.boundaryWarnings - 1);
-    saveRelationshipState(relState);
+    await saveRelationshipState(relState);
     return "好。我相信你。我们重新开始吧。";
   }
 

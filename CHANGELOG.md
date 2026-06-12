@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.4.0 (2026-06-12)
+
+### Breaking Changes
+- **StorageAdapter 接口全面异步化**：所有方法返回 `Promise`（`read/write/exists/mkdir/readdir/unlink/rmdir/stat/writeAtomic`）
+- 新增 `KVStore` 接口（`get/set/delete`），用于键值存储抽象
+- 顶层 API 改为 async：`loadProfile()`, `initDataRoot()`, `writeEnvFile()`, `reloadEnv()`, `writeFileAtomic()`, `setLogFile()`
+- 记忆系统全 async：`loadShortTerm`, `saveShortTerm`, `removeLastTurn`, `loadLongTerm`, `updateFact`, `deleteFact`, `applyForgettingCurve`, `buildMemoryContext`, `scoreMemoryFacts`, `loadLearnedInterests`, `buildMessageHistory`, `loadSummary`, `saveSummary`
+- 关系系统 async：`loadRelationshipState`, `saveRelationshipState`, `getOrCreateState`, `updateAffection`, `handleConfession`, `handleBoundaryViolation`, `executeBreakup`, `stayFriends`
+- 其他 async：`saveFeedback`, `loadRecentFeedback`, `buildFeedbackContext`, `searchConversations`, `saveEmotionState`, `loadEmotionState`
+
+### Added
+- `setStorageAdapter(adapter)` / `getStorage()` — 全局存储适配器注入
+- `setKVStore(store)` / `getKVStore()` — 全局键值存储注入
+- `NodeStorage` 异步实现（基于 `node:fs/promises`）
+- `MemoryStorage` 异步实现（测试用）
+
+### Changed
+- 全部 35 个源文件中 8 个文件的 `node:fs` 调用替换为 `getStorage()`
+- `node:path` 的 `resolve/join/dirname` 替换为跨平台字符串拼接
+- `writeAtomic` 使用 `writeFile` 覆盖替代 `rename`，避免 Windows EPERM
+
+### Fixed
+- 3 个测试文件异步化，全部 111 项测试通过
+
 ## v0.1.0 (2026-05-23)
 
 ### Initial Release

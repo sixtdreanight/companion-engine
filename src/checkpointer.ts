@@ -5,12 +5,7 @@
  * MemoryCheckpointer 用于测试。
  */
 
-import {
-  readFileSync, writeFileSync, renameSync,
-  existsSync, mkdirSync, unlinkSync, readdirSync,
-} from "node:fs";
-import { resolve, dirname } from "node:path";
-import { getDataRoot, sanitizePathId } from "./config.js";
+import { getDataRoot, sanitizePathId, getStorage } from "./config.js";
 import { logger } from "./utils.js";
 
 export interface Checkpointer<T = unknown> {
@@ -31,18 +26,19 @@ export class JsonCheckpointer<T = unknown> implements Checkpointer<T> {
 
   constructor(namespace: string) {
     const safeNs = sanitizePathId(namespace);
-    this.dir = resolve(getDataRoot(), "data", "checkpoints", safeNs);
+    this.dir = [getDataRoot(), "data", "checkpoints", safeNs].join("/").replace(/\/+/g, "/");
   }
 
   private filePath(key: string): string {
-    return resolve(this.dir, `${sanitizePathId(key)}.json`);
+    return [this.dir, `${sanitizePathId(key)}.json`].join("/").replace(/\/+/g, "/");
   }
 
   async get(key: string): Promise<T | null> {
+    const storage = getStorage();
     const path = this.filePath(key);
-    if (!existsSync(path)) return null;
+    if (!(await storage.exists(path))) return null;
     try {
-      return JSON.parse(readFileSync(path, "utf-8")) as T;
+      return JSON.parse(await storage.read(path)) as T;
     } catch {
       logger.warn("Checkpointer: failed to read %s", path);
       return null;
@@ -50,23 +46,22 @@ export class JsonCheckpointer<T = unknown> implements Checkpointer<T> {
   }
 
   async set(key: string, state: T): Promise<void> {
-    if (!existsSync(this.dir)) mkdirSync(this.dir, { recursive: true });
+    const storage = getStorage();
+    if (!(await storage.exists(this.dir))) await storage.mkdir(this.dir, { recursive: true });
     const path = this.filePath(key);
-    const tmp = path + ".tmp." + Date.now();
-    writeFileSync(tmp, JSON.stringify(state, null, 2), "utf-8");
-    renameSync(tmp, path);
+    await storage.writeAtomic(path, JSON.stringify(state, null, 2));
   }
 
   async delete(key: string): Promise<void> {
     const path = this.filePath(key);
     try {
-      if (existsSync(path)) unlinkSync(path);
+      await getStorage().unlink(path);
     } catch { /* best effort */ }
   }
 
   async list(): Promise<string[]> {
-    if (!existsSync(this.dir)) return [];
-    return readdirSync(this.dir)
+    if (!(await getStorage().exists(this.dir))) return [];
+    return (await getStorage().readdir(this.dir))
       .filter((f) => f.endsWith(".json"))
       .map((f) => f.replace(/\.json$/, ""));
   }

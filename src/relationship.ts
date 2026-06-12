@@ -8,9 +8,7 @@
  * 分手只在用户严重越线且屡次提醒无果时才会发生。
  */
 
-import { readFileSync, existsSync } from "node:fs";
-import { resolve } from "node:path";
-import { getDataRoot, writeFileAtomic, sanitizePathId } from "./config.js";
+import { getDataRoot, getStorage, sanitizePathId } from "./config.js";
 import type { RelationshipMode, RelationshipStage } from "./config.js";
 import { logger } from "./utils.js";
 
@@ -49,12 +47,12 @@ export interface ConfessionRecord {
 
 // ---- 常量 ----
 
-function relationshipPath(characterId?: string) {
+function relationshipPath(characterId?: string): string {
   if (characterId) {
     const safeId = sanitizePathId(characterId);
-    return resolve(getDataRoot(), "data", "relationships", `${safeId}.json`);
+    return [getDataRoot(), "data", "relationships", `${safeId}.json`].join("/").replace(/\/+/g, "/");
   }
-  return resolve(getDataRoot(), "data", "relationship.json");
+  return [getDataRoot(), "data", "relationship.json"].join("/").replace(/\/+/g, "/");
 }
 
 /** 告白成功的最低好感度 */
@@ -99,27 +97,27 @@ export function createRelationshipState(mode: RelationshipMode): RelationshipSta
 }
 
 /** 加载关系状态（支持多角色） */
-export function loadRelationshipState(characterId?: string): RelationshipState | null {
+export async function loadRelationshipState(characterId?: string): Promise<RelationshipState | null> {
   const path = relationshipPath(characterId);
-  if (!existsSync(path)) return null;
+  if (!(await getStorage().exists(path))) return null;
   try {
-    return JSON.parse(readFileSync(path, "utf-8")) as RelationshipState;
+    return JSON.parse(await getStorage().read(path)) as RelationshipState;
   } catch {
     return null;
   }
 }
 
 /** 保存关系状态 */
-export function saveRelationshipState(state: RelationshipState, characterId?: string) {
-  writeFileAtomic(relationshipPath(characterId), JSON.stringify(state, null, 2));
+export async function saveRelationshipState(state: RelationshipState, characterId?: string): Promise<void> {
+  await getStorage().writeAtomic(relationshipPath(characterId), JSON.stringify(state, null, 2));
 }
 
 /** 获取或初始化关系状态 */
-export function getOrCreateState(mode: RelationshipMode, characterId?: string): RelationshipState {
-  const existing = loadRelationshipState(characterId);
+export async function getOrCreateState(mode: RelationshipMode, characterId?: string): Promise<RelationshipState> {
+  const existing = await loadRelationshipState(characterId);
   if (existing) return existing;
   const state = createRelationshipState(mode);
-  saveRelationshipState(state, characterId);
+  await saveRelationshipState(state, characterId);
   return state;
 }
 
@@ -194,7 +192,7 @@ export function calculateAffectionDelta(
 /**
  * 更新好感度并检查阶段晋升
  */
-export function updateAffection(state: RelationshipState, delta: number): RelationshipState {
+export async function updateAffection(state: RelationshipState, delta: number): Promise<RelationshipState> {
   state.affection = Math.max(0, Math.min(100, state.affection + delta));
   state.totalInteractions++;
   state.lastInteractionAt = new Date().toISOString();
@@ -212,7 +210,7 @@ export function updateAffection(state: RelationshipState, delta: number): Relati
     }
   }
 
-  saveRelationshipState(state);
+  await saveRelationshipState(state);
   return state;
 }
 
@@ -235,7 +233,7 @@ export interface ConfessionResult {
  * 处理用户告白
  * 好感度达标 → 成功；未达标 → 可能成功也可能失败（带随机性）
  */
-export function handleConfession(state: RelationshipState): ConfessionResult {
+export async function handleConfession(state: RelationshipState): Promise<ConfessionResult> {
   const successChance = state.affection / 100; // 好感度 = 成功率
   const roll = Math.random();
   const success = roll < successChance && state.affection >= CONFESSION_THRESHOLD;
@@ -258,7 +256,7 @@ export function handleConfession(state: RelationshipState): ConfessionResult {
       "真的吗...？我也是。好开心。",
     ];
 
-    saveRelationshipState(state);
+    await saveRelationshipState(state);
     return {
       success: true,
       message: messages[Math.floor(Math.random() * messages.length)],
@@ -277,7 +275,7 @@ export function handleConfession(state: RelationshipState): ConfessionResult {
     message = "我需要再想想...今天有点突然。";
   }
 
-  saveRelationshipState(state);
+  await saveRelationshipState(state);
   return { success: false, message };
 }
 
@@ -303,18 +301,18 @@ export function checkBoundaryViolation(msg: string): boolean {
  * 处理越线行为
  * 返回当前警告级别和建议操作
  */
-export function handleBoundaryViolation(state: RelationshipState): {
+export async function handleBoundaryViolation(state: RelationshipState): Promise<{
   warnings: number;
   shouldWarn: boolean;
   shouldBreakup: boolean;
   warningMessage: string;
-} {
+}> {
   state.boundaryWarnings++;
 
   if (state.boundaryWarnings >= 3) {
     state.breakupPending = true;
     state.breakupReason = "多次越线行为，沟通无效";
-    saveRelationshipState(state);
+    await saveRelationshipState(state);
     return {
       warnings: state.boundaryWarnings,
       shouldWarn: true,
@@ -331,7 +329,7 @@ export function handleBoundaryViolation(state: RelationshipState): {
     "如果你心情不好可以告诉我，但不要用这种方式发泄好吗？",
   ];
 
-  saveRelationshipState(state);
+  await saveRelationshipState(state);
   return {
     warnings: state.boundaryWarnings,
     shouldWarn: true,
@@ -343,7 +341,7 @@ export function handleBoundaryViolation(state: RelationshipState): {
 /**
  * 执行分手 — 清除关系状态
  */
-export function executeBreakup(state: RelationshipState): void {
+export async function executeBreakup(state: RelationshipState): Promise<void> {
   logger.warn(`关系结束。原因: ${state.breakupReason || "用户选择"}`);
   state.mode = "slow_burn";
   state.stage = "stranger";
@@ -355,13 +353,13 @@ export function executeBreakup(state: RelationshipState): void {
   state.reachedStages = ["stranger"];
   state.totalInteractions = 0;
   state.startedAt = new Date().toISOString();
-  saveRelationshipState(state);
+  await saveRelationshipState(state);
 }
 
 /**
  * 分手后保持朋友关系
  */
-export function stayFriends(state: RelationshipState): void {
+export async function stayFriends(state: RelationshipState): Promise<void> {
   state.mode = "slow_burn";
   state.stage = "friend";
   state.affection = 20;
@@ -370,7 +368,7 @@ export function stayFriends(state: RelationshipState): void {
   state.breakupPending = false;
   state.breakupReason = undefined;
   state.reachedStages = ["stranger", "friend"];
-  saveRelationshipState(state);
+  await saveRelationshipState(state);
   logger.info("分手后选择继续做朋友");
 }
 

@@ -91,9 +91,9 @@ export function startScheduler(tasks: ScheduledTasks): { stop: () => void } {
   }));
 
   // 长期记忆维护 — 每天凌晨 3:00 运行遗忘曲线
-  jobs.push(cron.schedule("0 3 * * *", () => {
+  jobs.push(cron.schedule("0 3 * * *", async () => {
     logger.info("执行记忆遗忘曲线维护");
-    applyForgettingCurve();
+    await applyForgettingCurve();
   }));
 
   logger.info("定时任务已启动 (早安8:37 / 晚安22:17 / 午后15:47 / 记忆维护3:00)");

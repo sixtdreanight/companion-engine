@@ -15,6 +15,10 @@ export {
   type AppConfig,
   initDataRoot,
   getDataRoot,
+  setStorageAdapter,
+  getStorage,
+  setKVStore,
+  getKVStore,
   reloadEnv,
   writeEnvFile,
   loadProfile,
@@ -282,6 +286,7 @@ export {
 // ---- Storage ----
 export {
   type StorageAdapter,
+  type KVStore,
   NodeStorage,
   MemoryStorage,
 } from "./storage.js";

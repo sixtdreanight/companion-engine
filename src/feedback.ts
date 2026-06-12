@@ -5,9 +5,7 @@
  * 让 AI 逐渐适应用户的偏好。
  */
 
-import { readFileSync, existsSync, mkdirSync } from "node:fs";
-import { resolve } from "node:path";
-import { getDataRoot, writeFileAtomic } from "./config.js";
+import { getDataRoot, getStorage } from "./config.js";
 import { logger } from "./utils.js";
 import { adjustFactImportance, loadLongTerm } from "./memory.js";
 
@@ -22,28 +20,25 @@ export interface FeedbackEntry {
 const MAX_FEEDBACK = 50;
 
 function feedbackDir(): string {
-  return resolve(getDataRoot(), "data", "feedback");
+  return [getDataRoot(), "data", "feedback"].join("/").replace(/\/+/g, "/");
 }
 
 function feedbackFile(userId: string): string {
-  return resolve(feedbackDir(), `${userId}.json`);
+  return [feedbackDir(), `${userId}.json`].join("/").replace(/\/+/g, "/");
 }
 
-function ensureDir(): void {
-  const dir = feedbackDir();
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-}
-
-export function saveFeedback(
+export async function saveFeedback(
   userId: string,
   entry: FeedbackEntry,
-): void {
-  ensureDir();
+): Promise<void> {
+  const storage = getStorage();
+  const dir = feedbackDir();
+  if (!(await storage.exists(dir))) await storage.mkdir(dir, { recursive: true });
   const file = feedbackFile(userId);
   let list: FeedbackEntry[] = [];
-  if (existsSync(file)) {
+  if (await storage.exists(file)) {
     try {
-      list = JSON.parse(readFileSync(file, "utf-8"));
+      list = JSON.parse(await storage.read(file));
       if (!Array.isArray(list)) list = [];
     } catch {
       list = [];
@@ -51,11 +46,11 @@ export function saveFeedback(
   }
   list.push(entry);
   if (list.length > MAX_FEEDBACK) list = list.slice(-MAX_FEEDBACK);
-  writeFileAtomic(file, JSON.stringify(list, null, 2) + "\n");
+  await storage.writeAtomic(file, JSON.stringify(list, null, 2) + "\n");
 
   // 反馈闭环 → 调整记忆重要性
   try {
-    const memory = loadLongTerm();
+    const memory = await loadLongTerm();
     const relatedFacts = findRelatedFacts(entry.userMessage, memory.facts, 2);
 
     let delta = 0;
@@ -65,7 +60,7 @@ export function saveFeedback(
 
     for (const fact of relatedFacts) {
       const newContent = entry.type === "correction" ? entry.correctionText : undefined;
-      adjustFactImportance(fact.topic, delta, newContent);
+      await adjustFactImportance(fact.topic, delta, newContent);
     }
   } catch {
     // 重要性调整失败不影响反馈存储
@@ -93,11 +88,11 @@ function findRelatedFacts(
     .map((s) => s.fact);
 }
 
-export function loadRecentFeedback(userId: string, count = 5): FeedbackEntry[] {
+export async function loadRecentFeedback(userId: string, count = 5): Promise<FeedbackEntry[]> {
   const file = feedbackFile(userId);
-  if (!existsSync(file)) return [];
+  if (!(await getStorage().exists(file))) return [];
   try {
-    const list: unknown = JSON.parse(readFileSync(file, "utf-8"));
+    const list: unknown = JSON.parse(await getStorage().read(file));
     if (!Array.isArray(list)) return [];
     return list.slice(-count) as FeedbackEntry[];
   } catch {
@@ -106,8 +101,8 @@ export function loadRecentFeedback(userId: string, count = 5): FeedbackEntry[] {
   }
 }
 
-export function buildFeedbackContext(userId: string): string | undefined {
-  const recent = loadRecentFeedback(userId, 5);
+export async function buildFeedbackContext(userId: string): Promise<string | undefined> {
+  const recent = await loadRecentFeedback(userId, 5);
   if (recent.length === 0) return undefined;
 
   const disliked = recent.filter((f) => f.type === "thumbs_down" || f.type === "correction");

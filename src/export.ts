@@ -14,8 +14,8 @@ function formatTime(iso: string): string {
   });
 }
 
-export function exportToTXT(userId: string, profile?: Profile | null): string {
-  const history = loadShortTerm(userId, 9999);
+export async function exportToTXT(userId: string, profile?: Profile | null): Promise<string> {
+  const history = await loadShortTerm(userId, 9999);
   const lines: string[] = [];
   const partnerName = profile?.name || "TA";
 
@@ -38,8 +38,8 @@ export function exportToTXT(userId: string, profile?: Profile | null): string {
   return lines.join("\n");
 }
 
-export function exportToMarkdown(userId: string, profile?: Profile | null): string {
-  const history = loadShortTerm(userId, 9999);
+export async function exportToMarkdown(userId: string, profile?: Profile | null): Promise<string> {
+  const history = await loadShortTerm(userId, 9999);
   const lines: string[] = [];
   const partnerName = profile?.name || "TA";
 
@@ -65,8 +65,8 @@ export function exportToMarkdown(userId: string, profile?: Profile | null): stri
   return lines.join("\n");
 }
 
-export function exportToHTML(userId: string, profile?: Profile | null): string {
-  const history = loadShortTerm(userId, 9999);
+export async function exportToHTML(userId: string, profile?: Profile | null): Promise<string> {
+  const history = await loadShortTerm(userId, 9999);
   const partnerName = profile?.name || "TA";
   const userName = profile?.user_nickname || "你";
   const exportTime = new Date().toLocaleString("zh-CN");

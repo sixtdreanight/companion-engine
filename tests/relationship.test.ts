@@ -59,31 +59,31 @@ describe("calculateAffectionDelta", () => {
 });
 
 describe("updateAffection", () => {
-  it("accumulates affection and updates interaction time", () => {
+  it("accumulates affection and updates interaction time", async () => {
     const state = createRelationshipState("slow_burn");
-    updateAffection(state, 5);
+    await updateAffection(state, 5);
     expect(state.affection).toBe(5);
     expect(state.totalInteractions).toBe(1);
     expect(state.lastInteractionAt).toBeTruthy();
   });
 
-  it("clamps affection to 0-100", () => {
+  it("clamps affection to 0-100", async () => {
     const state = createRelationshipState("slow_burn");
-    updateAffection(state, -999);
+    await updateAffection(state, -999);
     expect(state.affection).toBe(0);
-    updateAffection(state, 999);
+    await updateAffection(state, 999);
     expect(state.affection).toBe(100);
   });
 
-  it("promotes stage when affection crosses threshold in slow_burn", () => {
+  it("promotes stage when affection crosses threshold in slow_burn", async () => {
     const state = createRelationshipState("slow_burn");
-    updateAffection(state, 20); // crosses friend threshold (15)
+    await updateAffection(state, 20); // crosses friend threshold (15)
     expect(state.stage).toBe("friend");
   });
 
-  it("does not promote in direct mode", () => {
+  it("does not promote in direct mode", async () => {
     const state = createRelationshipState("direct");
-    updateAffection(state, -50);
+    await updateAffection(state, -50);
     expect(state.stage).toBe("lover");
   });
 });
@@ -116,19 +116,19 @@ describe("applyAffectionDecay", () => {
 });
 
 describe("handleConfession", () => {
-  it("succeeds with max affection (deterministic)", () => {
+  it("succeeds with max affection (deterministic)", async () => {
     const state = createRelationshipState("slow_burn");
     state.affection = 100;  // 100% success chance
     state.stage = "crush";
-    const result = handleConfession(state);
+    const result = await handleConfession(state);
     expect(result.success).toBe(true);
     expect(state.stage).toBe("lover");
   });
 
-  it("fails with very low affection", () => {
+  it("fails with very low affection", async () => {
     const state = createRelationshipState("slow_burn");
     state.affection = 10;
-    const result = handleConfession(state);
+    const result = await handleConfession(state);
     expect(result.success).toBe(false);
   });
 });
@@ -148,32 +148,32 @@ describe("checkBoundaryViolation", () => {
 });
 
 describe("handleBoundaryViolation", () => {
-  it("escalates to breakup after 3 warnings", () => {
+  it("escalates to breakup after 3 warnings", async () => {
     const state = createRelationshipState("slow_burn");
     state.boundaryWarnings = 2;
-    const result = handleBoundaryViolation(state);
+    const result = await handleBoundaryViolation(state);
     expect(result.shouldBreakup).toBe(true);
     expect(state.breakupPending).toBe(true);
   });
 });
 
 describe("executeBreakup", () => {
-  it("resets relationship state", () => {
+  it("resets relationship state", async () => {
     const state = createRelationshipState("slow_burn");
     state.affection = 80;
     state.stage = "lover";
-    executeBreakup(state);
+    await executeBreakup(state);
     expect(state.stage).toBe("stranger");
     expect(state.affection).toBe(0);
   });
 });
 
 describe("stayFriends", () => {
-  it("resets to friend stage with 20 affection", () => {
+  it("resets to friend stage with 20 affection", async () => {
     const state = createRelationshipState("slow_burn");
     state.affection = 80;
     state.breakupPending = true;
-    stayFriends(state);
+    await stayFriends(state);
     expect(state.stage).toBe("friend");
     expect(state.affection).toBe(20);
     expect(state.breakupPending).toBe(false);

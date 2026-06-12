@@ -4,8 +4,7 @@
  * 支持：级别过滤、关联 ID 追踪、文件持久化、自动轮转
  */
 
-import { appendFileSync, renameSync, existsSync, statSync, mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { getStorage } from "./config.js";
 
 const LOG_LEVELS = ["debug", "info", "warn", "error"] as const;
 type LogLevel = (typeof LOG_LEVELS)[number];
@@ -14,16 +13,22 @@ let currentLevel: LogLevel = "info";
 let logFilePath: string | null = null;
 const MAX_LOG_SIZE = 5 * 1024 * 1024; // 5 MB 轮转
 
+// 异步日志缓冲：避免每次写日志都 await
+const logBuffer: string[] = [];
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
 /** 设置日志级别 */
 export function setLogLevel(level: LogLevel) {
   currentLevel = level;
 }
 
 /** 启用文件日志输出 */
-export function setLogFile(path: string) {
+export async function setLogFile(path: string): Promise<void> {
   logFilePath = path;
-  const dir = dirname(path);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  const dir = path.replace(/[/][^/]+$/, "");
+  if (dir && !(await getStorage().exists(dir))) {
+    await getStorage().mkdir(dir, { recursive: true });
+  }
 }
 
 function shouldLog(level: LogLevel): boolean {
@@ -42,17 +47,39 @@ function formatLine(level: string, cid: string | undefined, msg: string): string
 
 function writeToFile(line: string) {
   if (!logFilePath) return;
+  logBuffer.push(line + "\n");
+  if (!flushTimer) {
+    flushTimer = setTimeout(() => {
+      flushTimer = null;
+      flushLogBuffer().catch(() => {});
+    }, 1000);
+  }
+}
+
+async function flushLogBuffer(): Promise<void> {
+  if (logBuffer.length === 0 || !logFilePath) return;
+  const lines = logBuffer.splice(0);
+  const storage = getStorage();
   try {
-    if (existsSync(logFilePath) && statSync(logFilePath).size > MAX_LOG_SIZE) {
-      const rotated = logFilePath.replace(/\.log$/, `.old.log`);
-      if (existsSync(rotated)) {
-        // 追加到旧日志（简单策略，避免无限增长）
-        appendFileSync(rotated, `\n`);
+    let existing = "";
+    if (await storage.exists(logFilePath)) {
+      const s = await storage.stat(logFilePath);
+      if (s.size > MAX_LOG_SIZE) {
+        const rotated = logFilePath.replace(/\.log$/, ".old.log");
+        try {
+          const oldContent = await storage.read(logFilePath);
+          if (await storage.exists(rotated)) {
+            await storage.write(rotated, (await storage.read(rotated)) + "\n");
+          } else {
+            await storage.write(rotated, oldContent);
+          }
+        } catch { /* best effort */ }
+        existing = "";
       } else {
-        renameSync(logFilePath, rotated);
+        existing = await storage.read(logFilePath);
       }
     }
-    appendFileSync(logFilePath, line + "\n");
+    await storage.write(logFilePath, existing + lines.join(""));
   } catch {
     // 文件写入失败不阻塞主流程
   }

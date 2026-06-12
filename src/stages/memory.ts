@@ -14,6 +14,7 @@ import {
   saveSummary,
   type MemoryContext,
   type LearnedInterest,
+  type ConversationTurn,
 } from "../memory.js";
 import {
   generateConversationSummary,
@@ -34,7 +35,7 @@ export interface MemoryOutput {
   memoryContext: MemoryContext;
   learnedInterests: LearnedInterest[];
   conversationSummary: string | undefined;
-  fullHistory: ReturnType<typeof loadShortTerm>;
+  fullHistory: ConversationTurn[];
   summaryState: SummaryState;
 }
 
@@ -49,10 +50,10 @@ export async function memoryStage(
 ): Promise<MemoryOutput> {
   const { userId, model, config } = input;
 
-  const history = buildMessageHistory(userId, config.memory.maxHistoryTurns);
-  const memoryContext = buildMemoryContext(config.memory.maxFactsInContext, input.userMessage);
-  const learnedInterests = loadLearnedInterests().interests;
-  const fullHistory = loadShortTerm(userId, 9999);
+  const history = await buildMessageHistory(userId, config.memory.maxHistoryTurns);
+  const memoryContext = await buildMemoryContext(config.memory.maxFactsInContext, input.userMessage);
+  const learnedInterests = (await loadLearnedInterests()).interests;
+  const fullHistory = await loadShortTerm(userId, 9999);
 
   let state = existingState || {
     totalTurns: Math.floor(fullHistory.length / 2),
@@ -69,7 +70,7 @@ export async function memoryStage(
   // 动态摘要触发：当估算 token 用量 > 60% 上下文窗口时触发
   if (state.totalTurns >= MIN_TURNS_FOR_SUMMARY) {
     const needsSummary = shouldTriggerSummary(history, maxContextTokens);
-    const existingSummary = loadSummary(userId);
+    const existingSummary = await loadSummary(userId);
 
     if (!existingSummary && needsSummary) {
       // 首次摘要：压缩旧消息
@@ -86,7 +87,7 @@ export async function memoryStage(
           return result.text || "";
         });
         if (summary) {
-          saveSummary(userId, summary);
+          await saveSummary(userId, summary);
           state.lastSummaryTurn = state.totalTurns;
           conversationSummary = formatSummaryBlock(summary);
         }
@@ -107,7 +108,7 @@ export async function memoryStage(
           return result.text || "";
         });
         if (summary) {
-          saveSummary(userId, summary);
+          await saveSummary(userId, summary);
           state.lastSummaryTurn = state.totalTurns;
         }
       }

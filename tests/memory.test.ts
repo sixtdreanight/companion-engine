@@ -52,25 +52,25 @@ describe("sanitizePathId (path traversal defense)", () => {
 });
 
 describe("loadSummary", () => {
-  it("returns null for non-existent user without crashing", () => {
+  it("returns null for non-existent user without crashing", async () => {
     // Path traversal should be sanitized, not create files outside data dir
-    const result = loadSummary("../../../etc/passwd");
+    const result = await loadSummary("../../../etc/passwd");
     expect(result).toBeNull();
   });
 
-  it("returns null for user with special characters", () => {
-    const result = loadSummary("user<script>alert(1)</script>");
+  it("returns null for user with special characters", async () => {
+    const result = await loadSummary("user<script>alert(1)</script>");
     expect(result).toBeNull();
   });
 });
 
 describe("saveSummary + loadSummary roundtrip", () => {
-  it("saves and loads summary for valid user ID", () => {
+  it("saves and loads summary for valid user ID", async () => {
     const testUser = "test-summary-user-" + Date.now();
     const testSummary = "这是一段测试摘要内容";
 
-    saveSummary(testUser, testSummary);
-    const loaded = loadSummary(testUser);
+    await saveSummary(testUser, testSummary);
+    const loaded = await loadSummary(testUser);
 
     expect(loaded).toBe(testSummary);
   });

@@ -123,7 +123,7 @@ export async function processMessage(
   const t1 = Date.now();
   const pre = await preProcessStage({ userId, userMessage, model, config, profile });
   if (pre.earlyReturn !== null) {
-    saveShortTerm(userId, userMessage, pre.earlyReturn);
+    await saveShortTerm(userId, userMessage, pre.earlyReturn);
     return splitForChat(pre.earlyReturn);
   }
 
@@ -138,7 +138,7 @@ export async function processMessage(
 
   // Stage 3-5: 同前
   const t3 = Date.now();
-  const ctxOut = contextStage({
+  const ctxOut = await contextStage({
     userId, userMessage, profile, config,
     searchResults: pre.searchResults,
     memoryContext: mem.memoryContext,
@@ -159,7 +159,7 @@ export async function processMessage(
   });
 
   const t5 = Date.now();
-  const result = postProcessStage({
+  const result = await postProcessStage({
     userId,
     userMessage,
     reply: gen.reply,
@@ -197,7 +197,7 @@ export async function* processMessageStream(
   // Stage 1: PreProcess
   const pre = await preProcessStage({ userId, userMessage, model, config, profile });
   if (pre.earlyReturn !== null) {
-    saveShortTerm(userId, userMessage, pre.earlyReturn);
+    await saveShortTerm(userId, userMessage, pre.earlyReturn);
     for (const bubble of splitForChat(pre.earlyReturn)) {
       yield bubble;
     }
@@ -213,7 +213,7 @@ export async function* processMessageStream(
   await setSummaryState(userId, mem.summaryState, cp);
 
   // Stage 3: Context
-  const ctxOut = contextStage({
+  const ctxOut = await contextStage({
     userId, userMessage, profile, config,
     searchResults: pre.searchResults,
     memoryContext: mem.memoryContext,
@@ -251,7 +251,7 @@ export async function* processMessageStream(
   }
 
   // Stage 5: PostProcess
-  postProcessStage({
+  await postProcessStage({
     userId,
     userMessage,
     reply,

@@ -3,9 +3,7 @@
  * 遍历 data/conversations/*.json，匹配消息内容
  */
 
-import { readFileSync, existsSync, readdirSync } from "node:fs";
-import { resolve } from "node:path";
-import { getDataRoot } from "./config.js";
+import { getDataRoot, getStorage } from "./config.js";
 import type { ConversationTurn } from "./memory.js";
 
 export interface SearchHit {
@@ -17,21 +15,22 @@ export interface SearchHit {
   snippet: string;
 }
 
-export function searchConversations(query: string): SearchHit[] {
+export async function searchConversations(query: string): Promise<SearchHit[]> {
   if (!query || query.trim().length < 2) return [];
 
-  const convDir = resolve(getDataRoot(), "data", "conversations");
-  if (!existsSync(convDir)) return [];
+  const storage = getStorage();
+  const convDir = [getDataRoot(), "data", "conversations"].join("/").replace(/\/+/g, "/");
+  if (!(await storage.exists(convDir))) return [];
 
   const hits: SearchHit[] = [];
   const q = query.toLowerCase();
-  const files = readdirSync(convDir).filter((f) => f.endsWith(".json"));
+  const files = (await storage.readdir(convDir)).filter((f) => f.endsWith(".json"));
 
   for (const file of files) {
     const userId = file.replace(".json", "");
-    const filePath = resolve(convDir, file);
+    const filePath = [convDir, file].join("/").replace(/\/+/g, "/");
     try {
-      const raw = readFileSync(filePath, "utf-8");
+      const raw = await storage.read(filePath);
       const turns = JSON.parse(raw) as ConversationTurn[];
       for (const turn of turns) {
         const content = turn.content || "";

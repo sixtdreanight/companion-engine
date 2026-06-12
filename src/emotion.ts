@@ -5,9 +5,7 @@
  * 情绪影响回复风格：开心→活泼，疲惫→简短，焦虑→更温柔。
  */
 
-import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import { getDataRoot, writeFileAtomic } from "./config.js";
+import { getDataRoot, getStorage } from "./config.js";
 import { getDateInTimezone, pickRandom } from "./utils.js";
 
 // ---- 类型 ----
@@ -178,19 +176,19 @@ function _detectEmotionTriggers(msg: string): Emotion[] {
 
 // ---- 持久化 ----
 
-function emotionPath() {
-  return resolve(getDataRoot(), "data", "emotion-state.json");
+function emotionPath(): string {
+  return [getDataRoot(), "data", "emotion-state.json"].join("/").replace(/\/+/g, "/");
 }
 
-export function saveEmotionState(state: EmotionState): void {
-  writeFileAtomic(emotionPath(), JSON.stringify(state, null, 2));
+export async function saveEmotionState(state: EmotionState): Promise<void> {
+  await getStorage().writeAtomic(emotionPath(), JSON.stringify(state, null, 2));
 }
 
-export function loadEmotionState(): EmotionState | null {
+export async function loadEmotionState(): Promise<EmotionState | null> {
   const path = emotionPath();
-  if (!existsSync(path)) return null;
+  if (!(await getStorage().exists(path))) return null;
   try {
-    return JSON.parse(readFileSync(path, "utf-8")) as EmotionState;
+    return JSON.parse(await getStorage().read(path)) as EmotionState;
   } catch {
     return null;
   }

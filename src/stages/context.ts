@@ -22,7 +22,7 @@ import {
   type SessionState,
 } from "../girlfriend.js";
 import { buildStageGuidance } from "../relationship.js";
-import type { getOrCreateState } from "../relationship.js";
+import type { getOrCreateState, RelationshipState } from "../relationship.js";
 import { buildFeedbackContext } from "../feedback.js";
 import { buildMessageHistory, type MemoryContext, type LearnedInterest } from "../memory.js";
 import { getModelStrategy } from "../model-strategy.js";
@@ -44,7 +44,7 @@ export interface ContextInput {
   memoryContext: MemoryContext;
   learnedInterests: LearnedInterest[];
   conversationSummary: string | undefined;
-  relState: ReturnType<typeof getOrCreateState>;
+  relState: RelationshipState;
   /** Lore Book 激活条目（由 LoreBookManager.activate() 返回） */
   loreBeforeChar?: LoreBookEntry[];
   loreAfterChar?: LoreBookEntry[];
@@ -70,7 +70,7 @@ export function getSession(userId: string): SessionState {
   return session;
 }
 
-export function contextStage(input: ContextInput): ContextOutput {
+export async function contextStage(input: ContextInput): Promise<ContextOutput> {
   const {
     userId, userMessage, profile, config,
     searchResults, memoryContext, learnedInterests,
@@ -89,7 +89,7 @@ export function contextStage(input: ContextInput): ContextOutput {
   const emotion = detectSadness(userMessage);
 
   // 4. 冷场检测
-  const recentUserMsgs = buildMessageHistory(userId, 5)
+  const recentUserMsgs = (await buildMessageHistory(userId, 5))
     .filter((m) => m.role === "user")
     .map((m) => m.content);
   const isDying = isConversationDying([...recentUserMsgs, userMessage]);
@@ -122,7 +122,7 @@ export function contextStage(input: ContextInput): ContextOutput {
   }
 
   // 9. 用户反馈上下文
-  const feedbackCtx = buildFeedbackContext(userId);
+  const feedbackCtx = await buildFeedbackContext(userId);
   if (feedbackCtx) systemPrompt += "\n\n" + feedbackCtx;
 
   // 10. 冷场话题引导

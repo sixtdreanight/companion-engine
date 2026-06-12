@@ -1,9 +1,7 @@
-import { readFileSync, writeFileSync, renameSync, existsSync } from "node:fs";
-import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { randomBytes } from "node:crypto";
 import { parse as dotenvParse } from "dotenv";
 import { logger } from "./utils.js";
+import { NodeStorage, type StorageAdapter, type KVStore } from "./storage.js";
 
 // Try-load electron safeStorage for OS keychain encryption
 let _safeStorage: typeof import("electron").safeStorage | null = null;
@@ -104,22 +102,41 @@ export interface AppConfig {
   topicSelfCheck: boolean;
 }
 
-const __dirname = fileURLToPath(new URL(".", import.meta.url));
+const __dirname_pattern = "/src";
 
 let _dataRoot: string | null = null;
 
-export function initDataRoot(path: string): void {
+// ---- 平台适配器注入 ----
+
+let _storage: StorageAdapter = new NodeStorage();
+let _kvstore: KVStore | null = null;
+
+export function setStorageAdapter(adapter: StorageAdapter): void { _storage = adapter; }
+export function getStorage(): StorageAdapter { return _storage; }
+export function setKVStore(store: KVStore): void { _kvstore = store; }
+export function getKVStore(): KVStore {
+  if (!_kvstore) throw new Error("KVStore not set — call setKVStore() before using KV operations");
+  return _kvstore;
+}
+
+/** 构建数据目录下的绝对路径（纯字符串操作，不依赖 node:path） */
+function dataPath(...segments: string[]): string {
+  const root = _dataRoot ?? ".";
+  return [root, ...segments].join("/").replace(/\/+/g, "/");
+}
+
+export async function initDataRoot(path: string): Promise<void> {
   if (_dataRoot !== null) {
     logger.warn("Data root already initialized, ignoring");
     return;
   }
   _dataRoot = path;
-  loadEnvFile(path);
+  await loadEnvFile(path);
 }
 
 export function getDataRoot(): string {
   if (_dataRoot !== null) return _dataRoot;
-  return resolve(__dirname, "..", "..");
+  return "."; // fallback: current directory
 }
 
 const VALID_PROVIDERS = ["anthropic", "openai", "openai-compatible", "ollama"] as const;
@@ -131,11 +148,12 @@ const VALID_PROVIDERS = ["anthropic", "openai", "openai-compatible", "ollama"] a
  * 生产环境应考虑使用 electron.safeStorage 加密存储敏感值（如 API key），
  * 并在运行时解密后注入，而非将其放在 .env / process.env 中。
  */
-function loadEnvFile(dataRoot: string): void {
-  const envPath = resolve(dataRoot, ".env");
-  if (!existsSync(envPath)) return;
+async function loadEnvFile(dataRoot: string): Promise<void> {
+  const storage = getStorage();
+  const envPath = dataPath(dataRoot, ".env");
+  if (!(await storage.exists(envPath))) return;
   try {
-    const content = readFileSync(envPath, "utf-8");
+    const content = await storage.read(envPath);
     const parsed = dotenvParse(content);
     for (const [key, value] of Object.entries(parsed)) {
       if (value) {
@@ -157,21 +175,22 @@ function loadEnvFile(dataRoot: string): void {
 }
 
 /** Re-read .env from current data root — picks up runtime config changes */
-export function reloadEnv(): void {
-  loadEnvFile(getDataRoot());
+export async function reloadEnv(): Promise<void> {
+  await loadEnvFile(getDataRoot());
 }
 
 /** Write env values to .env in data root */
-export function writeEnvFile(partial: {
+export async function writeEnvFile(partial: {
   ai?: Partial<AIConfig>;
   qq?: Partial<QQConfig>;
   wechat?: Partial<WeChatConfig>;
   contentFilter?: AppConfig["contentFilter"];
-}): void {
-  const envPath = resolve(getDataRoot(), ".env");
+}): Promise<void> {
+  const storage = getStorage();
+  const envPath = dataPath(getDataRoot(), ".env");
   let content = "";
-  if (existsSync(envPath)) {
-    content = readFileSync(envPath, "utf-8");
+  if (await storage.exists(envPath)) {
+    content = await storage.read(envPath);
   }
   const setEnv = (key: string, value: string | undefined) => {
     if (value === undefined) return;
@@ -209,10 +228,8 @@ export function writeEnvFile(partial: {
   if (partial.contentFilter) {
     setEnv("CONTENT_FILTER", partial.contentFilter);
   }
-  const tmpPath = envPath + ".tmp." + Date.now();
-  writeFileSync(tmpPath, content, "utf-8");
-  renameSync(tmpPath, envPath);
-  reloadEnv();
+  await storage.writeAtomic(envPath, content);
+  await reloadEnv();
 }
 
 /** 默认配置，提供所有 fallback 值 */
@@ -289,15 +306,16 @@ function loadEnvConfig(): { ai: AIConfig; qq: QQConfig; wechat: WeChatConfig } {
 }
 
 /** 从 data/profile.json 加载女友角色卡 */
-export function loadProfile(): Profile | null {
-  const profilePath = resolve(getDataRoot(), "data", "profile.json");
-  if (!existsSync(profilePath)) {
+export async function loadProfile(): Promise<Profile | null> {
+  const storage = getStorage();
+  const profilePath = dataPath(getDataRoot(), "data", "profile.json");
+  if (!(await storage.exists(profilePath))) {
     logger.warn("未找到 data/profile.json，请先运行 npm run setup");
     return null;
   }
   let raw: string;
   try {
-    raw = readFileSync(profilePath, "utf-8");
+    raw = await storage.read(profilePath);
   } catch {
     logger.error("无法读取 data/profile.json");
     return null;
@@ -350,10 +368,8 @@ export function loadConfig(): AppConfig {
 }
 
 /** Atomic write: write to temp then rename (crash-safe on same filesystem) */
-export function writeFileAtomic(filePath: string, content: string): void {
-  const tmpPath = filePath + ".tmp." + randomBytes(4).toString("hex");
-  writeFileSync(tmpPath, content, "utf-8");
-  renameSync(tmpPath, filePath);
+export async function writeFileAtomic(filePath: string, content: string): Promise<void> {
+  await getStorage().writeAtomic(filePath, content);
 }
 
 /** Encrypt sensitive value using OS keychain (safeStorage). Returns prefix-tagged string. */

@@ -20,11 +20,11 @@ export interface PostProcessInput {
   totalTurns: number;
 }
 
-export function postProcessStage(input: PostProcessInput): string[] {
+export async function postProcessStage(input: PostProcessInput): Promise<string[]> {
   const { userId, userMessage, reply, model, config, profile, totalTurns } = input;
 
   // 1. 保存短期记忆
-  saveShortTerm(userId, userMessage, reply);
+  await saveShortTerm(userId, userMessage, reply);
 
   // 2. 长期记忆提取（每 longTermExtractInterval 轮触发 LLM 提取）
   if (totalTurns > 0 && totalTurns % config.memory.longTermExtractInterval === 0) {
@@ -79,7 +79,7 @@ export function postProcessStage(input: PostProcessInput): string[] {
       if (match) {
         // 话题用匹配内容中实际捕获的部分，而非无意义的首2字符
         const topic = match[1] || match[0].slice(0, 10);
-        updateFact(topic, match[0]);
+        await updateFact(topic, match[0]);
         break;
       }
     }
